@@ -19,6 +19,17 @@ $env:ANTHROPIC_API_KEY = "sk-ant-..."
 uv run main.py "메모장을 열고 '안녕하세요'라고 입력해줘"
 ```
 
+## 자가 점검 (처음 설치 후 권장)
+
+마우스/키보드를 움직이지 않고 환경을 점검합니다: DPI 인식, 화면 캡처와 좌표 변환, 입력 백엔드, 한글 클립보드, UI Automation, 화면 변화 감지.
+
+```powershell
+uv run selfcheck.py          # 로컬 기능만
+uv run selfcheck.py --api    # + API 키와 computer_toolset 요청 확인 (아주 작은 요청 1회)
+```
+
+결과는 `runs/selfcheck-<시각>/`에 저장됩니다 (`capture.png`, `selfcheck.json`).
+
 ## 긴급 정지
 - 마우스를 **화면 왼쪽 위 모서리**로 급히 옮기면 즉시 멈춥니다.
 - 터미널에서 `Ctrl+C`로도 멈출 수 있습니다.

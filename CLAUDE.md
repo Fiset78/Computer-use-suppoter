@@ -9,6 +9,7 @@ Claude API의 computer use(`computer_toolset_20260801`)를 직접 구동하는 W
 - 실행 기록: `runs/<시각>/` (스크린샷 PNG + actions.jsonl)
 - 벤치마크: `uv run bench.py [--tasks a,b] [--repeat N] [--label 이름] [--assist uia,wait] [--context server|prune|none] [--input pyautogui|directinput]` → `runs/bench-<시각>/` (results.jsonl, summary.json)
 - 테스트: `uv run pytest` (순수 모듈만)
+- Windows 자가 점검: `uv run selfcheck.py [--api]` (마우스/키보드를 움직이지 않음)
 
 ## 구조
 - `main.py`: 진입점. DPI 설정을 가장 먼저 호출한다 (pyautogui import 전)
