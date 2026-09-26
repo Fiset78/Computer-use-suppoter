@@ -1,0 +1,12 @@
+[project]
+name = "pc-agent"
+version = "0.1.0"
+description = "Claude computer use를 보조하는 Windows용 에이전트 하네스 (리서치용)"
+requires-python = ">=3.11"
+dependencies = [
+    "anthropic>=0.70",
+    "mss>=9.0",
+    "pillow>=10.0",
+    "pyautogui>=0.9.54",
+    "pyperclip>=1.9",
+]
