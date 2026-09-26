@@ -7,10 +7,15 @@ Claude API의 computer use(`computer_toolset_20260801`)를 직접 구동하는 W
 - `uv sync` 후 `uv run main.py "목표"`
 - 환경 변수: `ANTHROPIC_API_KEY` (필수), `PC_AGENT_MODEL`, `PC_AGENT_MAX_STEPS`, `PC_AGENT_MAX_LONG_EDGE`, `PC_AGENT_MONITOR`
 - 실행 기록: `runs/<시각>/` (스크린샷 PNG + actions.jsonl)
+- 벤치마크: `uv run bench.py [--tasks a,b] [--repeat N] [--label 이름]` → `runs/bench-<시각>/` (results.jsonl, summary.json)
+- 테스트: `uv run pytest` (순수 모듈만)
 
 ## 구조
 - `main.py`: 진입점. DPI 설정을 가장 먼저 호출한다 (pyautogui import 전)
-- `agent/loop.py`: 에이전트 루프, 시스템 프롬프트, 배치 처리
+- `bench.py`: 벤치마크 진입점. 과제 반복 실행, 자동/수동 판정, 결과 저장
+- `agent/loop.py`: 에이전트 루프, 시스템 프롬프트, 배치 처리. `run()`은 `RunResult`(상태, 단계, 행동, 토큰)를 반환
+- `benchmark/tasks.py`: 고정 과제 세트 (setup/check). 과제를 바꾸면 `TASK_SET_VERSION`을 올린다
+- `benchmark/metrics.py`: 결과 집계와 표 출력 (순수 모듈)
 - `perception/capture.py`: 캡처, 축소, 스크린샷↔화면 좌표 변환, zoom
 - `actions/executor.py`: 17개 멤버 도구 → pyautogui 동작
 - `actions/keys.py`: xdotool 스타일 키 이름 → pyautogui 키 이름 (순수 함수)
@@ -31,11 +36,11 @@ Claude API의 computer use(`computer_toolset_20260801`)를 직접 구동하는 W
 1. [x] 최소 루프 (스크린샷 → Claude → 실행)
 2. [x] 좌표 보정 (DPI 인식, 축소 비율 역변환)
 3. [x] 안전장치 + 로그 (기본형)
-4. [ ] 기준 성능 측정: 고정 과제 세트를 만들어 성공률/단계 수/토큰 기록
+4. [ ] 기준 성능 측정: 고정 과제 세트를 만들어 성공률/단계 수/토큰 기록 (측정 도구 완료, Windows에서 실측 필요)
 5. [ ] 보조 도구: `uiautomation`으로 UI 요소 목록 + `click_element` 커스텀 도구, `wait_for_change`
 6. [ ] 컨텍스트 관리: 스크린샷 누적 대응 (Opus 5.5/Fable 5.1은 클라이언트 측 가지치기 대신 서버 측 tool result clearing 권장)
 7. [ ] 입력 백엔드 교체 가능하게 (게임용 `pydirectinput`)
 
 ## 규칙
-- 이 코드는 Windows에서만 실제로 동작한다. Linux/CI에서는 `actions/keys.py` 같은 순수 모듈만 테스트한다.
+- 이 코드는 Windows에서만 실제로 동작한다. Linux/CI에서는 `actions/keys.py`, `benchmark/metrics.py` 같은 순수 모듈만 테스트한다.
 - 사용자 메시지/주석/로그는 한국어로 작성한다.

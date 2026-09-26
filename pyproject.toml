@@ -10,3 +10,10 @@ dependencies = [
     "pyautogui>=0.9.54",
     "pyperclip>=1.9",
 ]
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

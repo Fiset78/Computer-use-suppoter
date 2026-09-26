@@ -11,8 +11,9 @@ from PIL import Image
 
 
 class Recorder:
-    def __init__(self, base_dir: str, goal: str):
-        self.dir = Path(base_dir) / time.strftime("%Y%m%d-%H%M%S")
+    def __init__(self, base_dir: str, goal: str, name: str | None = None):
+        # name을 주지 않으면 시각으로 폴더 이름을 정한다 (벤치마크는 과제별 이름을 넘김)
+        self.dir = Path(base_dir) / (name or time.strftime("%Y%m%d-%H%M%S"))
         self.dir.mkdir(parents=True, exist_ok=True)
         self._log = open(self.dir / "actions.jsonl", "a", encoding="utf-8")
         self._img_count = 0

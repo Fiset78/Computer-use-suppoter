@@ -40,7 +40,9 @@ def main() -> None:
 
     try:
         result = loop.run(goal, executor, recorder)
-        print(f"\n=== 결과 ===\n{result}")
+        print(f"\n=== 결과 ({result.status}) ===\n{result.final}")
+        print(f"단계 {result.steps} · 행동 {result.actions} (실패 {result.action_errors}) · "
+              f"토큰 입력 {result.input_tokens:,} / 출력 {result.output_tokens:,}")
     except pyautogui.FailSafeException:
         print("\n긴급 정지되었습니다 (마우스가 화면 모서리로 이동).")
         recorder.event("abort", reason="failsafe")
