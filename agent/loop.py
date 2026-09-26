@@ -12,11 +12,11 @@ API 규칙 (computer_toolset_20260801):
 """
 from dataclasses import asdict, dataclass
 
-import pyautogui
 from anthropic import Anthropic
 
 import config
 from actions.assist import OBSERVE_TOOLS as ASSIST_OBSERVE_TOOLS
+from actions import backends
 from actions.assist import AssistTools
 from actions.executor import Executor
 from agent import context
@@ -109,9 +109,9 @@ def process_tool_calls(response, executor: Executor, recorder: Recorder,
                     raise NotImplementedError(f"Unknown tool: {block.name}")
                 result["content"] = handler(block.name, block.input)
                 recorder.event("action", name=block.name, input=block.input, ok=True)
-            except (pyautogui.FailSafeException, KeyboardInterrupt):
-                raise  # 긴급 정지는 루프 전체를 멈춘다
             except Exception as err:
+                if backends.is_failsafe(err):
+                    raise  # 긴급 정지는 루프 전체를 멈춘다 (Ctrl+C는 Exception이 아니라서 그대로 올라감)
                 result["content"] = f"Error: {err}"
                 result["is_error"] = True
                 failed = True

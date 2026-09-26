@@ -10,6 +10,7 @@
     uv run bench.py --label baseline      # 결과 폴더 이름에 붙일 이름 (비교용)
     uv run bench.py --assist uia,wait     # 보조 도구를 켜고 측정 (기본: 끔 = 순수 computer use)
     uv run bench.py --context prune       # 컨텍스트 관리 전략 (server | prune | none)
+    uv run bench.py --input directinput   # 입력 백엔드 (pyautogui | directinput)
 
 결과: runs/bench-<시각>[-label]/
     results.jsonl   실행마다 한 줄
@@ -24,15 +25,15 @@ import sys
 import time
 from pathlib import Path
 
-# DPI 설정은 다른 GUI 모듈(pyautogui)을 import 하기 전에 해야 한다
+# DPI 설정은 다른 GUI 모듈(pyautogui, pydirectinput)을 import 하기 전에 해야 한다
 from perception.capture import enable_dpi_awareness
 
 enable_dpi_awareness()
 
-import pyautogui  # noqa: E402
 from anthropic import APIError  # noqa: E402
 
 import config  # noqa: E402
+from actions import backends  # noqa: E402
 from actions.executor import Executor  # noqa: E402
 from agent import context, loop  # noqa: E402
 from benchmark.metrics import format_table, summarize  # noqa: E402
@@ -73,6 +74,8 @@ def main() -> int:
                         help="보조 도구: uia, wait, all, none (기본: PC_AGENT_ASSIST 환경 변수)")
     parser.add_argument("--context", default=None,
                         help="컨텍스트 전략: server, prune, none (기본: PC_AGENT_CONTEXT 환경 변수)")
+    parser.add_argument("--input", default=None,
+                        help="입력 백엔드: pyautogui, directinput (기본: PC_AGENT_INPUT 환경 변수)")
     parser.add_argument("--list", action="store_true", help="과제 목록만 출력")
     parser.add_argument("--no-pause", action="store_true", help="과제 사이에 Enter를 기다리지 않음")
     args = parser.parse_args()
@@ -83,6 +86,11 @@ def main() -> int:
         if args.context is not None:
             config.CONTEXT = args.context.strip().lower()
         context.resolve_strategy(config.CONTEXT, config.MODEL)  # 잘못된 값이면 여기서 ValueError
+        if args.input is not None:
+            config.INPUT_BACKEND = args.input.strip().lower()
+        if config.INPUT_BACKEND not in backends.BACKENDS:
+            raise ValueError(f"알 수 없는 입력 백엔드: {config.INPUT_BACKEND} "
+                             f"(사용 가능: {', '.join(backends.BACKENDS)})")
         tasks = get_tasks([t.strip() for t in args.tasks.split(",")] if args.tasks else None)
     except ValueError as err:
         print(err)
@@ -93,6 +101,11 @@ def main() -> int:
             print(f"{t.id:22} {t.goal}")
         return 0
 
+    try:
+        backend = backends.create(config.INPUT_BACKEND)
+    except ImportError as err:
+        print(f"입력 백엔드 '{config.INPUT_BACKEND}'를 불러오지 못했습니다: {err}")
+        return 2
     screen = Screen(config.MAX_LONG_EDGE, config.MONITOR_INDEX)
     name = "bench-" + time.strftime("%Y%m%d-%H%M%S") + (f"-{args.label}" if args.label else "")
     out_dir = Path(config.RUNS_DIR) / name
@@ -110,6 +123,7 @@ def main() -> int:
         "assist": config.ASSIST,
         "context": context.resolve_strategy(config.CONTEXT, config.MODEL)[0],
         "prompt_cache": config.PROMPT_CACHE,
+        "input_backend": backend.name,
         "clear": {"trigger": config.CLEAR_TRIGGER, "keep": config.CLEAR_KEEP,
                   "at_least": config.CLEAR_AT_LEAST},
         "prune": {"keep": config.PRUNE_KEEP, "batch": config.PRUNE_BATCH},
@@ -119,7 +133,7 @@ def main() -> int:
     }
     print(f"결과 폴더: {out_dir}")
     print(f"모델 {config.MODEL} · 화면 {screen.width}x{screen.height} → {screen.shot_w}x{screen.shot_h} "
-          f"· 과제 {len(tasks)}개 × {args.repeat}회 · 보조 도구 {','.join(config.ASSIST) or '없음'} · 컨텍스트 {meta['context']}")
+          f"· 과제 {len(tasks)}개 × {args.repeat}회 · 보조 도구 {','.join(config.ASSIST) or '없음'} · 컨텍스트 {meta['context']} · 입력 {backend.name}")
     print("긴급 정지: 마우스를 왼쪽 위 모서리로 / Ctrl+C\n")
 
     records: list[dict] = []
@@ -143,12 +157,12 @@ def main() -> int:
                     task.setup()
 
                 recorder = Recorder(str(out_dir), task.goal, name=f"{task.id}-{trial}")
-                executor = Executor(screen, Guard(confirm=True), recorder, config.ACTION_DELAY)
+                executor = Executor(screen, Guard(confirm=True), recorder, config.ACTION_DELAY, backend)
                 result = loop.RunResult()
                 started = time.perf_counter()
                 try:
                     loop.run(task.goal, executor, recorder, stats=result)
-                except (pyautogui.FailSafeException, KeyboardInterrupt) as err:
+                except KeyboardInterrupt as err:
                     result.status = "aborted"
                     result.final = type(err).__name__
                     stopped = True
@@ -156,6 +170,12 @@ def main() -> int:
                     result.status = "error"
                     result.final = f"API 오류: {err}"
                     print(f"  {result.final}")
+                except Exception as err:
+                    if not backends.is_failsafe(err):
+                        raise
+                    result.status = "aborted"
+                    result.final = type(err).__name__
+                    stopped = True
                 seconds = time.perf_counter() - started
 
                 ctx = CheckContext(final=result.final, screen_size=(screen.width, screen.height))

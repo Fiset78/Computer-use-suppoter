@@ -8,14 +8,13 @@
 """
 import sys
 
-# DPI 설정은 다른 GUI 모듈(pyautogui)을 import 하기 전에 해야 한다
+# DPI 설정은 다른 GUI 모듈(pyautogui, pydirectinput)을 import 하기 전에 해야 한다
 from perception.capture import enable_dpi_awareness
 
 enable_dpi_awareness()
 
-import pyautogui  # noqa: E402
-
 import config  # noqa: E402
+from actions import backends  # noqa: E402
 from actions.executor import Executor  # noqa: E402
 from agent import context, loop  # noqa: E402
 from logs.recorder import Recorder  # noqa: E402
@@ -31,7 +30,8 @@ def main() -> None:
 
     try:
         context.resolve_strategy(config.CONTEXT, config.MODEL)
-    except ValueError as err:
+        backend = backends.create(config.INPUT_BACKEND)
+    except (ValueError, ImportError) as err:
         print(err)
         return
 
@@ -40,10 +40,10 @@ def main() -> None:
           f"(배율 {screen.scale:.3f})")
 
     recorder = Recorder(config.RUNS_DIR, goal)
-    executor = Executor(screen, Guard(confirm=True), recorder, config.ACTION_DELAY)
+    executor = Executor(screen, Guard(confirm=True), recorder, config.ACTION_DELAY, backend)
     print(f"기록 폴더: {recorder.dir}")
     print(f"보조 도구: {', '.join(config.ASSIST) or '없음 (순수 computer use)'} · "
-          f"컨텍스트 전략: {config.CONTEXT}")
+          f"컨텍스트 전략: {config.CONTEXT} · 입력 백엔드: {backend.name}")
     print("긴급 정지: 마우스를 왼쪽 위 모서리로 / Ctrl+C\n")
 
     try:
@@ -52,12 +52,14 @@ def main() -> None:
         print(f"단계 {result.steps} · 행동 {result.actions} (실패 {result.action_errors}) · "
               f"토큰 입력 {result.input_tokens:,} + 캐시 읽기 {result.cache_read_tokens:,} "
               f"/ 캐시 쓰기 {result.cache_write_tokens:,} / 출력 {result.output_tokens:,}")
-    except pyautogui.FailSafeException:
-        print("\n긴급 정지되었습니다 (마우스가 화면 모서리로 이동).")
-        recorder.event("abort", reason="failsafe")
     except KeyboardInterrupt:
         print("\n사용자가 중단했습니다.")
         recorder.event("abort", reason="keyboard_interrupt")
+    except Exception as err:
+        if not backends.is_failsafe(err):
+            raise
+        print("\n긴급 정지되었습니다 (마우스가 화면 모서리로 이동).")
+        recorder.event("abort", reason="failsafe")
     finally:
         recorder.close()
 

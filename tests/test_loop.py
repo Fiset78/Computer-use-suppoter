@@ -183,3 +183,20 @@ def test_run_prune_and_none_use_plain_endpoint(monkeypatch):
 def test_run_prune_on_preserved_thinking_model_switches_to_server(monkeypatch):
     client, _ = run_with(monkeypatch, "prune", model="claude-opus-5-5")
     assert client.plain == [] and len(client.beta_sent) == 1
+
+
+def test_failsafe_from_backend_stops_whole_loop():
+    import pyautogui
+    import pytest
+
+    from actions import backends
+
+    backends.create("pyautogui")  # 긴급 정지 예외 등록
+
+    class Stop(FakeExecutor):
+        def run(self, name, inp):
+            raise pyautogui.FailSafeException("corner")
+
+    with pytest.raises(pyautogui.FailSafeException):
+        loop.process_tool_calls(response(tool_use("a", "left_click"), tool_use("b", "key", text="a")),
+                                Stop(), FakeRecorder(), None)

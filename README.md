@@ -85,9 +85,28 @@ uv run bench.py --repeat 3 --label ctx-none --context none
 
 벤치마크 요약 표에 캐시 읽기/쓰기 토큰이 함께 나옵니다.
 
+## 입력 백엔드 (7단계)
+
+마우스/키보드 입력을 보내는 부분을 바꿀 수 있습니다 (`PC_AGENT_INPUT`, `bench.py --input`).
+
+| 백엔드 | 용도 | 방식 |
+|---|---|---|
+| `pyautogui` (기본) | 일반 데스크톱 앱 | pyautogui |
+| `directinput` | 게임 (마인크래프트 등) | `pydirectinput-rgx`의 SendInput + 스캔 코드. DirectX 게임은 일반 가상 키 입력을 무시하는 경우가 많음 |
+
+```powershell
+$env:PC_AGENT_INPUT = "directinput"
+uv run main.py "마인크래프트에서 앞으로 3초 걸어가줘"
+```
+
+- 두 백엔드 모두 모르는 키 이름은 조용히 무시하지 않고 오류로 Claude에게 알려줍니다 (예: `directinput`에는 한/영 키가 없음).
+- 한글 같은 비ASCII 텍스트는 어느 백엔드든 클립보드 붙여넣기(Ctrl+V)로 입력합니다. 게임 채팅창처럼 붙여넣기를 막는 곳에서는 입력되지 않습니다.
+- 긴급 정지(마우스를 왼쪽 위 모서리로)는 두 백엔드 모두 동작합니다.
+- 백엔드에는 상대 마우스 이동(`move_rel`)도 있습니다. 1인칭 게임의 시점 회전용이며, 아직 Claude가 쓸 도구로는 노출하지 않았습니다.
+
 ## 테스트
 
-GUI 없이 돌릴 수 있는 로직만 테스트합니다: 키 변환, 결과 집계, 요소 목록 형식, 화면 변화 판정, 컨텍스트 관리, 그리고 가짜 `pyautogui`와 가짜 API 클라이언트로 에이전트 루프의 tool_result 규칙과 요청 형태.
+GUI 없이 돌릴 수 있는 로직만 테스트합니다: 키 변환, 결과 집계, 요소 목록 형식, 화면 변화 판정, 컨텍스트 관리, 그리고 입력 백엔드, 가짜 `pyautogui`/`pydirectinput`와 가짜 API 클라이언트로 에이전트 루프의 tool_result 규칙과 요청 형태.
 
 ```powershell
 uv run pytest
@@ -102,6 +121,7 @@ uv run pytest
 | `PC_AGENT_MONITOR` | `1` | 캡처할 모니터 (1 = 주 모니터) |
 | `PC_AGENT_ASSIST` | (없음) | 켤 보조 도구: `uia`, `wait`, `all` |
 | `PC_AGENT_CONTEXT` | `server` | 컨텍스트 전략: `server`, `prune`, `none` |
+| `PC_AGENT_INPUT` | `pyautogui` | 입력 백엔드: `pyautogui`, `directinput` |
 | `PC_AGENT_PROMPT_CACHE` | `1` | `0`이면 캐시 중단점을 넣지 않음 |
 | `PC_AGENT_CLEAR_TRIGGER` / `_KEEP` / `_AT_LEAST` | `40000` / `6` / `10000` | server 전략: 발동 입력 토큰 / 남길 도구 결과 수 / 한 번에 최소로 지울 토큰 |
 | `PC_AGENT_PRUNE_KEEP` / `_BATCH` | `3` / `10` | prune 전략: 남길 스크린샷 수 / 몰아서 지울 단위 |

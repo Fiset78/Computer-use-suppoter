@@ -8,8 +8,6 @@ custom 도구의 tool_use에는 toolset_name이 없고, tool_result에도 넣지
 """
 import time
 
-import pyautogui
-
 from perception import diff
 from perception.elements import UIElement, filter_elements, format_elements
 
@@ -159,7 +157,8 @@ class AssistTools:
         click = inp.get("click", "left")
         button = "right" if click == "right" else "left"
         clicks = 2 if click == "double" else 1
-        pyautogui.click(cx, cy, button=button, clicks=clicks, interval=0.08)
+        self.executor.input.move_to(cx, cy)
+        self.executor.input.click(button=button, clicks=clicks, interval=0.08)
         time.sleep(self.executor.action_delay)
         x, y = self.screen.to_shot(cx, cy)
         return f'OK: [{idx}] "{el.name}" 클릭 ({x},{y})'

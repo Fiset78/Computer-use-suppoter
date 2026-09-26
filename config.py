@@ -64,3 +64,6 @@ CLEAR_AT_LEAST = int(os.getenv("PC_AGENT_CLEAR_AT_LEAST", "10000"))
 # prune: 스크린샷이 PRUNE_KEEP + PRUNE_BATCH장을 넘으면 최근 PRUNE_KEEP장만 남긴다.
 PRUNE_KEEP = int(os.getenv("PC_AGENT_PRUNE_KEEP", "3"))
 PRUNE_BATCH = int(os.getenv("PC_AGENT_PRUNE_BATCH", "10"))
+
+# 입력 백엔드 (로드맵 7단계): pyautogui (일반 앱, 기본) | directinput (게임, pydirectinput-rgx)
+INPUT_BACKEND = os.getenv("PC_AGENT_INPUT", "pyautogui").strip().lower()
