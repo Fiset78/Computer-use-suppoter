@@ -45,3 +45,22 @@ def parse_assist(text: str | None) -> list[str]:
 
 
 ASSIST = parse_assist(os.getenv("PC_AGENT_ASSIST"))
+
+# 컨텍스트 관리 전략 (로드맵 6단계): server | prune | none
+#   server = 서버 측 tool result clearing (권장, 모든 모델에서 안전)
+#   prune  = 클라이언트 측 스크린샷 가지치기 (Opus 5.5 / Fable 5.1에서는 자동으로 server로 바뀜)
+#   none   = 아무것도 지우지 않음
+CONTEXT = os.getenv("PC_AGENT_CONTEXT", "server").strip().lower()
+
+# prompt caching 중단점 사용 여부 (비용 절감, 동작은 바뀌지 않음)
+PROMPT_CACHE = os.getenv("PC_AGENT_PROMPT_CACHE", "1") != "0"
+
+# server: 입력 토큰이 CLEAR_TRIGGER를 넘으면 최근 CLEAR_KEEP개 도구 호출 결과만 남기고 지운다.
+# 한 번에 최소 CLEAR_AT_LEAST 토큰 이상 지울 수 있을 때만 지운다 (지울 때마다 캐시가 다시 써지므로).
+CLEAR_TRIGGER = int(os.getenv("PC_AGENT_CLEAR_TRIGGER", "40000"))
+CLEAR_KEEP = int(os.getenv("PC_AGENT_CLEAR_KEEP", "6"))
+CLEAR_AT_LEAST = int(os.getenv("PC_AGENT_CLEAR_AT_LEAST", "10000"))
+
+# prune: 스크린샷이 PRUNE_KEEP + PRUNE_BATCH장을 넘으면 최근 PRUNE_KEEP장만 남긴다.
+PRUNE_KEEP = int(os.getenv("PC_AGENT_PRUNE_KEEP", "3"))
+PRUNE_BATCH = int(os.getenv("PC_AGENT_PRUNE_BATCH", "10"))

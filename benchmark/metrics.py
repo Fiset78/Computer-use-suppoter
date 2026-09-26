@@ -3,10 +3,12 @@
 레코드 하나 = 과제 1회 실행 결과 dict:
     {"task": str, "trial": int, "success": bool | None, "status": str,
      "steps": int, "actions": int, "action_errors": int,
-     "input_tokens": int, "output_tokens": int, "seconds": float}
+     "input_tokens": int, "output_tokens": int, "cache_read_tokens": int,
+     "cache_write_tokens": int, "seconds": float, ...}
 success가 None이면 판정하지 않은(건너뛴) 실행으로 보고 성공률 계산에서 뺀다.
 """
-METRIC_KEYS = ("steps", "actions", "action_errors", "input_tokens", "output_tokens", "seconds")
+METRIC_KEYS = ("steps", "actions", "action_errors", "input_tokens", "output_tokens",
+               "cache_read_tokens", "cache_write_tokens", "cleared_tool_uses", "pruned_images", "seconds")
 
 
 def _mean(values: list[float]) -> float | None:
@@ -58,6 +60,8 @@ COLUMNS = [
     ("단계", "avg_steps", "float"),
     ("행동", "avg_actions", "float"),
     ("입력토큰", "avg_input_tokens", "int"),
+    ("캐시읽기", "avg_cache_read_tokens", "int"),
+    ("캐시쓰기", "avg_cache_write_tokens", "int"),
     ("출력토큰", "avg_output_tokens", "int"),
     ("시간(s)", "avg_seconds", "float"),
 ]

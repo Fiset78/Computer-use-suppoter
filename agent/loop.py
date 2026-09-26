@@ -7,6 +7,8 @@ API 규칙 (computer_toolset_20260801):
 - 한 응답에 tool_use 블록이 여러 개 올 수 있다(배치). 순서대로 실행한다.
 - 모든 tool_use 블록에 tool_result를 하나씩 돌려줘야 하고, 각 결과에 toolset_name="computer"를 넣는다.
 - 중간에 하나가 실패하면 나머지는 실행하지 않고 정해진 문구로 is_error를 돌려준다.
+
+컨텍스트 관리(스크린샷 누적 대응)는 agent/context.py 참고.
 """
 from dataclasses import asdict, dataclass
 
@@ -17,6 +19,7 @@ import config
 from actions.assist import OBSERVE_TOOLS as ASSIST_OBSERVE_TOOLS
 from actions.assist import AssistTools
 from actions.executor import Executor
+from agent import context
 from logs.recorder import Recorder
 
 TOOLSET = "computer"
@@ -47,8 +50,12 @@ class RunResult:
     steps: int = 0           # Claude API 호출 수
     actions: int = 0         # 실제로 실행한 도구 호출 수
     action_errors: int = 0   # 실행 중 실패한 도구 호출 수
-    input_tokens: int = 0
+    input_tokens: int = 0         # 캐시되지 않은 입력 토큰
     output_tokens: int = 0
+    cache_read_tokens: int = 0    # 캐시에서 읽은 입력 토큰 (정가의 약 0.1배)
+    cache_write_tokens: int = 0   # 캐시에 새로 쓴 입력 토큰 (정가의 약 1.25배)
+    cleared_tool_uses: int = 0    # 서버가 지운 도구 결과 수 (server 전략)
+    pruned_images: int = 0        # 클라이언트가 지운 스크린샷 수 (prune 전략)
     stop_reason: str | None = None
 
     def to_dict(self) -> dict:
@@ -127,6 +134,12 @@ def build_system_prompt(assist: AssistTools | None) -> str:
     return SYSTEM_PROMPT + "\n보조 도구:\n" + assist.prompt_hints() + "\n"
 
 
+def _applied_edits(response) -> list[dict]:
+    cm = getattr(response, "context_management", None)
+    edits = getattr(cm, "applied_edits", None) or []
+    return [e.model_dump(exclude_none=True) if hasattr(e, "model_dump") else dict(e) for e in edits]
+
+
 def run(goal: str, executor: Executor, recorder: Recorder, stats: RunResult | None = None) -> RunResult:
     """목표를 수행하고 RunResult를 돌려준다.
     stats를 넘기면 그 객체를 채워 나가므로, 중간에 예외로 멈춰도 그때까지의 통계가 남는다."""
@@ -134,7 +147,13 @@ def run(goal: str, executor: Executor, recorder: Recorder, stats: RunResult | No
     client = Anthropic()  # ANTHROPIC_API_KEY 환경 변수 사용
     assist = AssistTools(executor, config.ASSIST) if config.ASSIST else None
     tools = [{"type": "computer_toolset_20260801"}] + (assist.tool_defs() if assist else [])
-    system = build_system_prompt(assist)
+    # system과 tools는 실행 중에 절대 바꾸지 않는다 (캐시와 preserved thinking이 모두 깨짐)
+    system = context.system_blocks(build_system_prompt(assist), cache=config.PROMPT_CACHE)
+
+    strategy, warning = context.resolve_strategy(config.CONTEXT, config.MODEL)
+    if warning:
+        print(f"주의: {warning}")
+    recorder.event("context", strategy=strategy, prompt_cache=config.PROMPT_CACHE)
 
     # 지시 텍스트를 이미지보다 먼저 두면 클릭 정확도가 좋아진다 (공식 권장)
     messages: list[dict] = [{
@@ -146,21 +165,48 @@ def run(goal: str, executor: Executor, recorder: Recorder, stats: RunResult | No
     }]
 
     for step in range(1, config.MAX_STEPS + 1):
+        if strategy == "prune":
+            pruned = context.prune_images(messages, config.PRUNE_KEEP, config.PRUNE_BATCH)
+            if pruned:
+                stats.pruned_images += pruned
+                print(f"  (오래된 스크린샷 {pruned}장 제거)")
+                recorder.event("prune", step=step, pruned=pruned)
+
         print(f"\n[step {step}/{config.MAX_STEPS}] Claude에게 요청 중...")
-        response = client.messages.create(
+        request = dict(
             model=config.MODEL,
             max_tokens=4096,
             system=system,
             tools=tools,
-            messages=messages,
+            messages=context.with_cache_breakpoints(messages) if config.PROMPT_CACHE else messages,
         )
+        if strategy == "server":
+            response = client.beta.messages.create(
+                betas=[context.CONTEXT_MANAGEMENT_BETA],
+                context_management={"edits": [context.clear_tool_uses_edit(
+                    config.CLEAR_TRIGGER, config.CLEAR_KEEP, config.CLEAR_AT_LEAST)]},
+                **request,
+            )
+        else:
+            response = client.messages.create(**request)
+
         u = response.usage
+        cache_read = getattr(u, "cache_read_input_tokens", None) or 0
+        cache_write = getattr(u, "cache_creation_input_tokens", None) or 0
+        edits = _applied_edits(response)
         stats.steps = step
         stats.input_tokens += u.input_tokens
         stats.output_tokens += u.output_tokens
+        stats.cache_read_tokens += cache_read
+        stats.cache_write_tokens += cache_write
+        stats.cleared_tool_uses += sum(e.get("cleared_tool_uses", 0) for e in edits)
         stats.stop_reason = response.stop_reason
         recorder.event("response", step=step, stop_reason=response.stop_reason,
-                       input_tokens=u.input_tokens, output_tokens=u.output_tokens)
+                       input_tokens=u.input_tokens, output_tokens=u.output_tokens,
+                       cache_read_tokens=cache_read, cache_write_tokens=cache_write,
+                       **({"applied_edits": edits} if edits else {}))
+        if edits:
+            print(f"  (서버가 오래된 도구 결과를 지움: {edits})")
 
         for block in response.content:
             if block.type == "text" and block.text.strip():

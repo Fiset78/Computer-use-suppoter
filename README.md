@@ -65,9 +65,29 @@ uv run bench.py --repeat 3 --label baseline
 uv run bench.py --repeat 3 --label assist --assist all
 ```
 
+## 컨텍스트 관리 (6단계)
+
+스크린샷은 한 장에 입력 토큰 약 1,000~1,800개라 단계가 길어질수록 비용이 커집니다. 두 가지를 적용합니다.
+
+- **prompt caching (항상 켜짐):** system과 최근 user 메시지 3개에 캐시 중단점을 둡니다. 이전 대화는 캐시에서 읽으므로(정가의 약 0.1배) 동작은 같고 비용만 줄어듭니다.
+- **오래된 스크린샷 정리 (`PC_AGENT_CONTEXT`):**
+
+| 전략 | 방식 | 비고 |
+|---|---|---|
+| `server` (기본) | 서버 측 tool result clearing. 입력이 40,000토큰을 넘으면 최근 도구 결과 6개만 남기고 서버가 지움 | 모든 모델에서 안전 |
+| `prune` | 스크린샷이 13장을 넘으면 최근 3장만 남기고 클라이언트가 지움 (몰아서 지워 캐시를 덜 깸) | Opus 5.5 / Fable 5.1에서는 자동으로 `server`로 바뀜 |
+| `none` | 지우지 않음 | 비교용 |
+
+```powershell
+uv run bench.py --repeat 3 --label ctx-server --context server
+uv run bench.py --repeat 3 --label ctx-none --context none
+```
+
+벤치마크 요약 표에 캐시 읽기/쓰기 토큰이 함께 나옵니다.
+
 ## 테스트
 
-GUI 없이 돌릴 수 있는 로직만 테스트합니다: 키 변환, 결과 집계, 요소 목록 형식, 화면 변화 판정, 그리고 가짜 `pyautogui`로 에이전트 루프의 tool_result 규칙.
+GUI 없이 돌릴 수 있는 로직만 테스트합니다: 키 변환, 결과 집계, 요소 목록 형식, 화면 변화 판정, 컨텍스트 관리, 그리고 가짜 `pyautogui`와 가짜 API 클라이언트로 에이전트 루프의 tool_result 규칙과 요청 형태.
 
 ```powershell
 uv run pytest
@@ -81,3 +101,7 @@ uv run pytest
 | `PC_AGENT_MAX_LONG_EDGE` | `1280` | 스크린샷 긴 변 최대 픽셀 |
 | `PC_AGENT_MONITOR` | `1` | 캡처할 모니터 (1 = 주 모니터) |
 | `PC_AGENT_ASSIST` | (없음) | 켤 보조 도구: `uia`, `wait`, `all` |
+| `PC_AGENT_CONTEXT` | `server` | 컨텍스트 전략: `server`, `prune`, `none` |
+| `PC_AGENT_PROMPT_CACHE` | `1` | `0`이면 캐시 중단점을 넣지 않음 |
+| `PC_AGENT_CLEAR_TRIGGER` / `_KEEP` / `_AT_LEAST` | `40000` / `6` / `10000` | server 전략: 발동 입력 토큰 / 남길 도구 결과 수 / 한 번에 최소로 지울 토큰 |
+| `PC_AGENT_PRUNE_KEEP` / `_BATCH` | `3` / `10` | prune 전략: 남길 스크린샷 수 / 몰아서 지울 단위 |

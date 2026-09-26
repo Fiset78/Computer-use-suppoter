@@ -9,6 +9,7 @@
     uv run bench.py --list                # 과제 목록 보기
     uv run bench.py --label baseline      # 결과 폴더 이름에 붙일 이름 (비교용)
     uv run bench.py --assist uia,wait     # 보조 도구를 켜고 측정 (기본: 끔 = 순수 computer use)
+    uv run bench.py --context prune       # 컨텍스트 관리 전략 (server | prune | none)
 
 결과: runs/bench-<시각>[-label]/
     results.jsonl   실행마다 한 줄
@@ -33,7 +34,7 @@ from anthropic import APIError  # noqa: E402
 
 import config  # noqa: E402
 from actions.executor import Executor  # noqa: E402
-from agent import loop  # noqa: E402
+from agent import context, loop  # noqa: E402
 from benchmark.metrics import format_table, summarize  # noqa: E402
 from benchmark.tasks import TASK_SET_VERSION, CheckContext, get_tasks  # noqa: E402
 from logs.recorder import Recorder  # noqa: E402
@@ -70,6 +71,8 @@ def main() -> int:
     parser.add_argument("--label", default="", help="결과 폴더 이름에 붙일 이름")
     parser.add_argument("--assist", default=None,
                         help="보조 도구: uia, wait, all, none (기본: PC_AGENT_ASSIST 환경 변수)")
+    parser.add_argument("--context", default=None,
+                        help="컨텍스트 전략: server, prune, none (기본: PC_AGENT_CONTEXT 환경 변수)")
     parser.add_argument("--list", action="store_true", help="과제 목록만 출력")
     parser.add_argument("--no-pause", action="store_true", help="과제 사이에 Enter를 기다리지 않음")
     args = parser.parse_args()
@@ -77,6 +80,9 @@ def main() -> int:
     try:
         if args.assist is not None:
             config.ASSIST = config.parse_assist(args.assist)
+        if args.context is not None:
+            config.CONTEXT = args.context.strip().lower()
+        context.resolve_strategy(config.CONTEXT, config.MODEL)  # 잘못된 값이면 여기서 ValueError
         tasks = get_tasks([t.strip() for t in args.tasks.split(",")] if args.tasks else None)
     except ValueError as err:
         print(err)
@@ -102,13 +108,18 @@ def main() -> int:
         "action_delay": config.ACTION_DELAY,
         "auto_screenshot": config.AUTO_SCREENSHOT,
         "assist": config.ASSIST,
+        "context": context.resolve_strategy(config.CONTEXT, config.MODEL)[0],
+        "prompt_cache": config.PROMPT_CACHE,
+        "clear": {"trigger": config.CLEAR_TRIGGER, "keep": config.CLEAR_KEEP,
+                  "at_least": config.CLEAR_AT_LEAST},
+        "prune": {"keep": config.PRUNE_KEEP, "batch": config.PRUNE_BATCH},
         "repeat": args.repeat,
         "tasks": [t.id for t in tasks],
         "started": time.strftime("%Y-%m-%d %H:%M:%S"),
     }
     print(f"결과 폴더: {out_dir}")
     print(f"모델 {config.MODEL} · 화면 {screen.width}x{screen.height} → {screen.shot_w}x{screen.shot_h} "
-          f"· 과제 {len(tasks)}개 × {args.repeat}회 · 보조 도구 {','.join(config.ASSIST) or '없음'}")
+          f"· 과제 {len(tasks)}개 × {args.repeat}회 · 보조 도구 {','.join(config.ASSIST) or '없음'} · 컨텍스트 {meta['context']}")
     print("긴급 정지: 마우스를 왼쪽 위 모서리로 / Ctrl+C\n")
 
     records: list[dict] = []
@@ -160,7 +171,8 @@ def main() -> int:
                 results_file.flush()
                 mark = {True: "성공", False: "실패", None: "판정 안 함"}[success]
                 print(f"  → {mark} ({method}) · 상태 {result.status} · 단계 {result.steps} · "
-                      f"토큰 {result.input_tokens:,}/{result.output_tokens:,} · {seconds:.1f}s")
+                      f"토큰 입력 {result.input_tokens:,} + 캐시 {result.cache_read_tokens:,} / "
+                      f"출력 {result.output_tokens:,} · {seconds:.1f}s")
                 if stopped:
                     print("\n긴급 정지로 벤치마크를 멈춥니다.")
                     break
