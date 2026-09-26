@@ -36,6 +36,7 @@ def main() -> None:
     recorder = Recorder(config.RUNS_DIR, goal)
     executor = Executor(screen, Guard(confirm=True), recorder, config.ACTION_DELAY)
     print(f"기록 폴더: {recorder.dir}")
+    print(f"보조 도구: {', '.join(config.ASSIST) or '없음 (순수 computer use)'}")
     print("긴급 정지: 마우스를 왼쪽 위 모서리로 / Ctrl+C\n")
 
     try:

@@ -14,12 +14,15 @@ import pyautogui
 from anthropic import Anthropic
 
 import config
+from actions.assist import OBSERVE_TOOLS as ASSIST_OBSERVE_TOOLS
+from actions.assist import AssistTools
 from actions.executor import Executor
 from logs.recorder import Recorder
 
 TOOLSET = "computer"
 NOT_EXECUTED = "Not executed: an earlier computer action in this turn failed."
-OBSERVE_TOOLS = {"screenshot", "zoom"}
+NOT_EXECUTED_CUSTOM = "Not executed: an earlier action in this turn failed."
+OBSERVE_TOOLS = {"screenshot", "zoom"} | ASSIST_OBSERVE_TOOLS
 
 SYSTEM_PROMPT = """\
 당신은 Windows PC를 화면을 보고 마우스와 키보드로 조작하는 에이전트입니다.
@@ -63,7 +66,14 @@ def _as_blocks(content) -> list[dict]:
     return content
 
 
-def process_tool_calls(response, executor: Executor, recorder: Recorder) -> list[dict]:
+def process_tool_calls(response, executor: Executor, recorder: Recorder,
+                       assist: AssistTools | None = None) -> list[dict]:
+    """응답의 tool_use 블록을 순서대로 실행하고 tool_result 목록을 돌려준다.
+
+    computer 멤버 도구 결과에만 toolset_name을 넣는다 (custom 보조 도구 결과에는 넣지 않음).
+    하나라도 실패하면 뒤의 블록은 종류와 상관없이 실행하지 않는다.
+    뒤 동작은 앞 동작이 성공한 화면을 전제로 하기 때문이다.
+    """
     results: list[dict] = []
     failed = False
     last_name = None
@@ -71,22 +81,26 @@ def process_tool_calls(response, executor: Executor, recorder: Recorder) -> list
     for block in response.content:
         if block.type != "tool_use":
             continue
-        if getattr(block, "toolset_name", None) != TOOLSET:
-            # 지금은 computer 툴셋만 선언했으므로 이 경우는 없어야 한다.
-            results.append({
-                "type": "tool_result", "tool_use_id": block.id,
-                "content": f"Unknown tool: {block.name}", "is_error": True,
-            })
-            continue
+        is_computer = getattr(block, "toolset_name", None) == TOOLSET
 
-        result = {"type": "tool_result", "tool_use_id": block.id, "toolset_name": TOOLSET}
+        result = {"type": "tool_result", "tool_use_id": block.id}
+        if is_computer:
+            result["toolset_name"] = TOOLSET
         if failed:
-            result["content"] = NOT_EXECUTED
+            result["content"] = NOT_EXECUTED if is_computer else NOT_EXECUTED_CUSTOM
             result["is_error"] = True
         else:
+            if is_computer:
+                handler = executor.run
+            elif assist is not None and assist.has(block.name):
+                handler = assist.run
+            else:
+                handler = None
             print(f"  → {block.name} {block.input}")
             try:
-                result["content"] = executor.run(block.name, block.input)
+                if handler is None:
+                    raise NotImplementedError(f"Unknown tool: {block.name}")
+                result["content"] = handler(block.name, block.input)
                 recorder.event("action", name=block.name, input=block.input, ok=True)
             except (pyautogui.FailSafeException, KeyboardInterrupt):
                 raise  # 긴급 정지는 루프 전체를 멈춘다
@@ -99,13 +113,18 @@ def process_tool_calls(response, executor: Executor, recorder: Recorder) -> list
         results.append(result)
         last_name = block.name
 
-    # 배치가 스크린샷으로 끝나지 않았다면 현재 화면을 마지막 결과에 붙여서 왕복 한 번을 아낀다
-    if (config.AUTO_SCREENSHOT and results and not failed
-            and last_name not in OBSERVE_TOOLS and results[-1].get("toolset_name") == TOOLSET):
+    # 배치가 관찰 도구로 끝나지 않았다면 현재 화면을 마지막 결과에 붙여서 왕복 한 번을 아낀다
+    if config.AUTO_SCREENSHOT and results and not failed and last_name not in OBSERVE_TOOLS:
         last = results[-1]
         last["content"] = _as_blocks(last["content"]) + [executor.screenshot_block("auto")]
 
     return results
+
+
+def build_system_prompt(assist: AssistTools | None) -> str:
+    if assist is None or not assist.names:
+        return SYSTEM_PROMPT
+    return SYSTEM_PROMPT + "\n보조 도구:\n" + assist.prompt_hints() + "\n"
 
 
 def run(goal: str, executor: Executor, recorder: Recorder, stats: RunResult | None = None) -> RunResult:
@@ -113,7 +132,9 @@ def run(goal: str, executor: Executor, recorder: Recorder, stats: RunResult | No
     stats를 넘기면 그 객체를 채워 나가므로, 중간에 예외로 멈춰도 그때까지의 통계가 남는다."""
     stats = stats if stats is not None else RunResult()
     client = Anthropic()  # ANTHROPIC_API_KEY 환경 변수 사용
-    tools = [{"type": "computer_toolset_20260801"}]
+    assist = AssistTools(executor, config.ASSIST) if config.ASSIST else None
+    tools = [{"type": "computer_toolset_20260801"}] + (assist.tool_defs() if assist else [])
+    system = build_system_prompt(assist)
 
     # 지시 텍스트를 이미지보다 먼저 두면 클릭 정확도가 좋아진다 (공식 권장)
     messages: list[dict] = [{
@@ -129,7 +150,7 @@ def run(goal: str, executor: Executor, recorder: Recorder, stats: RunResult | No
         response = client.messages.create(
             model=config.MODEL,
             max_tokens=4096,
-            system=SYSTEM_PROMPT,
+            system=system,
             tools=tools,
             messages=messages,
         )
@@ -147,8 +168,8 @@ def run(goal: str, executor: Executor, recorder: Recorder, stats: RunResult | No
 
         messages.append({"role": "assistant", "content": [_block_to_dict(b) for b in response.content]})
 
-        results = process_tool_calls(response, executor, recorder)
-        executed = [r for r in results if r.get("content") != NOT_EXECUTED]
+        results = process_tool_calls(response, executor, recorder, assist)
+        executed = [r for r in results if r.get("content") not in (NOT_EXECUTED, NOT_EXECUTED_CUSTOM)]
         stats.actions += len(executed)
         stats.action_errors += sum(1 for r in executed if r.get("is_error"))
 

@@ -8,6 +8,7 @@
     uv run bench.py --tasks calc_multiply,notepad_save
     uv run bench.py --list                # 과제 목록 보기
     uv run bench.py --label baseline      # 결과 폴더 이름에 붙일 이름 (비교용)
+    uv run bench.py --assist uia,wait     # 보조 도구를 켜고 측정 (기본: 끔 = 순수 computer use)
 
 결과: runs/bench-<시각>[-label]/
     results.jsonl   실행마다 한 줄
@@ -67,11 +68,15 @@ def main() -> int:
     parser.add_argument("--tasks", help="쉼표로 구분한 과제 id (기본: 전체)")
     parser.add_argument("--repeat", type=int, default=1, help="과제별 반복 횟수")
     parser.add_argument("--label", default="", help="결과 폴더 이름에 붙일 이름")
+    parser.add_argument("--assist", default=None,
+                        help="보조 도구: uia, wait, all, none (기본: PC_AGENT_ASSIST 환경 변수)")
     parser.add_argument("--list", action="store_true", help="과제 목록만 출력")
     parser.add_argument("--no-pause", action="store_true", help="과제 사이에 Enter를 기다리지 않음")
     args = parser.parse_args()
 
     try:
+        if args.assist is not None:
+            config.ASSIST = config.parse_assist(args.assist)
         tasks = get_tasks([t.strip() for t in args.tasks.split(",")] if args.tasks else None)
     except ValueError as err:
         print(err)
@@ -96,13 +101,14 @@ def main() -> int:
         "screenshot": [screen.shot_w, screen.shot_h],
         "action_delay": config.ACTION_DELAY,
         "auto_screenshot": config.AUTO_SCREENSHOT,
+        "assist": config.ASSIST,
         "repeat": args.repeat,
         "tasks": [t.id for t in tasks],
         "started": time.strftime("%Y-%m-%d %H:%M:%S"),
     }
     print(f"결과 폴더: {out_dir}")
     print(f"모델 {config.MODEL} · 화면 {screen.width}x{screen.height} → {screen.shot_w}x{screen.shot_h} "
-          f"· 과제 {len(tasks)}개 × {args.repeat}회")
+          f"· 과제 {len(tasks)}개 × {args.repeat}회 · 보조 도구 {','.join(config.ASSIST) or '없음'}")
     print("긴급 정지: 마우스를 왼쪽 위 모서리로 / Ctrl+C\n")
 
     records: list[dict] = []

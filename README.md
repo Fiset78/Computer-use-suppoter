@@ -46,9 +46,28 @@ uv run bench.py --tasks calc_multiply  # 일부 과제만
 - 결과는 `runs/bench-<시각>-<label>/`에 저장됩니다. `summary.json`에는 과제별·전체 요약과 실행 조건(모델, 스크린샷 크기 등)이 들어 있습니다.
 - 과제는 `%USERPROFILE%\pc-agent-bench\` 폴더 안에서만 파일을 만들고 지웁니다.
 
+## 보조 도구 (5단계)
+
+순수 computer use에 더해 Claude가 쓸 수 있는 custom 도구입니다. 기본은 꺼져 있고(기준 성능), 환경 변수나 `--assist`로 켭니다.
+
+| 묶음 | 도구 | 설명 |
+|---|---|---|
+| `uia` | `list_ui_elements` | 활성 창의 버튼, 입력칸, 메뉴 등을 Windows UI Automation으로 읽어 `[id] 종류 "이름" (x,y)` 목록으로 돌려줌 |
+| `uia` | `click_element` | 목록의 id로 요소를 클릭 (클릭 직전에 위치를 다시 읽음) |
+| `wait` | `wait_for_change` | 마지막 스크린샷과 달라질 때까지 기다렸다가, 화면이 멈추면 새 스크린샷을 돌려줌 |
+
+```powershell
+$env:PC_AGENT_ASSIST = "uia,wait"      # 또는 all
+uv run main.py "계산기를 열어서 123 곱하기 45를 계산해줘"
+
+# 기준 성능과 비교
+uv run bench.py --repeat 3 --label baseline
+uv run bench.py --repeat 3 --label assist --assist all
+```
+
 ## 테스트
 
-GUI 없이 돌릴 수 있는 순수 모듈(`actions/keys.py`, `benchmark/metrics.py`)만 테스트합니다.
+GUI 없이 돌릴 수 있는 로직만 테스트합니다: 키 변환, 결과 집계, 요소 목록 형식, 화면 변화 판정, 그리고 가짜 `pyautogui`로 에이전트 루프의 tool_result 규칙.
 
 ```powershell
 uv run pytest
@@ -61,3 +80,4 @@ uv run pytest
 | `PC_AGENT_MAX_STEPS` | `30` | 최대 반복 수 |
 | `PC_AGENT_MAX_LONG_EDGE` | `1280` | 스크린샷 긴 변 최대 픽셀 |
 | `PC_AGENT_MONITOR` | `1` | 캡처할 모니터 (1 = 주 모니터) |
+| `PC_AGENT_ASSIST` | (없음) | 켤 보조 도구: `uia`, `wait`, `all` |

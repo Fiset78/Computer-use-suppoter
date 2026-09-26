@@ -28,6 +28,7 @@ class Executor:
         self.guard = guard
         self.recorder = recorder
         self.action_delay = action_delay
+        self.last_shot = None  # Claude에게 마지막으로 보낸 전체 스크린샷 (wait_for_change의 기준)
 
     # ---------- 공통 유틸 ----------
     def _point(self, coord) -> tuple[int, int]:
@@ -52,11 +53,15 @@ class Executor:
             for k in reversed(modifiers):
                 pyautogui.keyUp(k)
 
-    def screenshot_block(self, label: str = "shot") -> dict:
-        img = self.screen.capture()
+    def image_block(self, img, label: str) -> dict:
+        """전체 화면 스크린샷을 기록하고 이미지 블록으로 만든다."""
+        self.last_shot = img
         if self.recorder:
             self.recorder.image(img, label)
         return to_image_block(img)
+
+    def screenshot_block(self, label: str = "shot") -> dict:
+        return self.image_block(self.screen.capture(), label)
 
     # ---------- 디스패치 ----------
     def run(self, name: str, inp: dict):

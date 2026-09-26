@@ -22,3 +22,26 @@ AUTO_SCREENSHOT = True
 
 # 실행 기록 저장 폴더
 RUNS_DIR = os.getenv("PC_AGENT_RUNS_DIR", "runs")
+
+
+# 켤 보조 도구 묶음 (로드맵 5단계). 쉼표로 구분: uia, wait, all. 비우면 순수 computer use (기준 성능).
+#   uia  = list_ui_elements + click_element (Windows UI Automation)
+#   wait = wait_for_change (화면 변화 감지)
+ASSIST_GROUPS = ("uia", "wait")
+
+
+def parse_assist(text: str | None) -> list[str]:
+    """"uia,wait" -> ["uia", "wait"]. "all"은 전체, 빈 값/"none"은 없음."""
+    items = [t.strip().lower() for t in (text or "").split(",") if t.strip()]
+    if not items or items in (["none"], ["off"]):
+        return []
+    if "all" in items:
+        return list(ASSIST_GROUPS)
+    unknown = [t for t in items if t not in ASSIST_GROUPS]
+    if unknown:
+        raise ValueError(f"알 수 없는 보조 도구: {', '.join(unknown)} "
+                         f"(사용 가능: {', '.join(ASSIST_GROUPS)}, all)")
+    return [g for g in ASSIST_GROUPS if g in items]
+
+
+ASSIST = parse_assist(os.getenv("PC_AGENT_ASSIST"))
