@@ -21,12 +21,15 @@ DANGEROUS_TEXT = re.compile(
 
 
 class Guard:
-    def __init__(self, confirm: bool = True):
+    def __init__(self, confirm: bool = True, ask=None):
         self.confirm = confirm
+        self.ask = ask  # what -> bool. 없으면 터미널에서 묻는다 (실행 창은 대화상자를 넘긴다)
 
     def _ask(self, what: str) -> bool:
         if not self.confirm:
             return True
+        if self.ask is not None:
+            return bool(self.ask(what))
         ans = input(f"\n⚠️  위험할 수 있는 행동: {what}\n   실행할까요? [y/N] ").strip().lower()
         return ans == "y"
 

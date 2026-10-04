@@ -10,7 +10,7 @@ from contextlib import contextmanager
 
 import pyperclip
 
-from actions.backends import InputBackend, PyAutoGuiBackend
+from actions.backends import InputBackend, PyAutoGuiBackend, StopRequested
 from actions.keys import parse_combo, parse_modifiers
 from perception.capture import Screen, to_image_block
 from safety.guard import Guard
@@ -18,13 +18,18 @@ from safety.guard import Guard
 
 class Executor:
     def __init__(self, screen: Screen, guard: Guard, recorder=None, action_delay: float = 0.4,
-                 backend: InputBackend | None = None):
+                 backend: InputBackend | None = None, stop_check=None):
         self.screen = screen
         self.input = backend if backend is not None else PyAutoGuiBackend()
         self.guard = guard
         self.recorder = recorder
         self.action_delay = action_delay
         self.last_shot = None  # Claude에게 마지막으로 보낸 전체 스크린샷 (wait_for_change의 기준)
+        self.stop_check = stop_check  # 참을 돌려주면 다음 행동 전에 멈춘다 (실행 창의 정지 버튼)
+
+    def check_stop(self) -> None:
+        if self.stop_check is not None and self.stop_check():
+            raise StopRequested("사용자가 정지했습니다.")
 
     # ---------- 공통 유틸 ----------
     def _point(self, coord) -> tuple[int, int]:
@@ -64,6 +69,7 @@ class Executor:
 
     # ---------- 디스패치 ----------
     def run(self, name: str, inp: dict):
+        self.check_stop()
         handler = getattr(self, f"do_{name}", None)
         if handler is None:
             raise NotImplementedError(f"구현되지 않은 도구입니다: {name}")

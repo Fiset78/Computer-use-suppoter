@@ -1,0 +1,48 @@
+"""음성 입력 정리 규칙과, 실행 창의 정지 버튼 경로 (GUI 없이 검사)."""
+import pytest
+
+from actions import backends
+from voice.text import SAMPLE_RATE, clean_transcript, is_too_short
+
+
+def test_clean_joins_and_trims():
+    assert clean_transcript([" 메모장을 열고 ", "", "  안녕이라고   입력해줘"]) == "메모장을 열고 안녕이라고 입력해줘"
+
+
+def test_clean_drops_hallucination_on_silence():
+    assert clean_transcript(["시청해 주셔서 감사합니다."]) == ""
+    # 실제 명령 안에 들어 있으면 지우지 않는다
+    long = "유튜브에서 시청해 주셔서 감사합니다라는 영상을 찾아서 재생해줘"
+    assert clean_transcript([long]) == long
+
+
+def test_too_short():
+    assert is_too_short(SAMPLE_RATE // 4)
+    assert not is_too_short(SAMPLE_RATE * 2)
+
+
+def test_stop_request_is_treated_as_failsafe():
+    assert backends.is_failsafe(backends.StopRequested())
+
+
+def test_executor_stops_before_next_action():
+    from actions.executor import Executor
+    from safety.guard import Guard
+
+    class Backend:
+        def __getattr__(self, name):
+            raise AssertionError("정지 후에는 입력을 보내면 안 됩니다")
+
+    ex = Executor(screen=None, guard=Guard(confirm=False), backend=Backend(), stop_check=lambda: True)
+    with pytest.raises(backends.StopRequested):
+        ex.run("key", {"text": "a"})
+
+
+def test_guard_uses_dialog_callback():
+    from safety.guard import Guard
+
+    asked = []
+    g = Guard(confirm=True, ask=lambda what: asked.append(what) or False)
+    with pytest.raises(PermissionError):
+        g.check_key(["alt", "f4"])
+    assert asked and "alt+f4" in asked[0]

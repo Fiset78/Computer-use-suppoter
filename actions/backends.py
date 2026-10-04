@@ -15,6 +15,10 @@ _FAILSAFE_ERRORS: list[type] = []
 BACKENDS = ("pyautogui", "directinput")
 
 
+class StopRequested(Exception):
+    """사용자가 창의 정지 버튼을 눌렀다. 긴급 정지와 같은 경로로 실행 전체를 멈춘다."""
+
+
 def is_failsafe(err: BaseException) -> bool:
     """마우스를 화면 모서리로 옮겨서 난 긴급 정지인지. 어떤 백엔드든 같은 방식으로 판단한다."""
     return isinstance(err, tuple(_FAILSAFE_ERRORS))
@@ -23,6 +27,9 @@ def is_failsafe(err: BaseException) -> bool:
 def _register_failsafe(exc: type) -> None:
     if exc not in _FAILSAFE_ERRORS:
         _FAILSAFE_ERRORS.append(exc)
+
+
+_register_failsafe(StopRequested)
 
 
 class InputBackend:
