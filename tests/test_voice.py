@@ -76,3 +76,34 @@ def test_parse_hotkey_rejects(bad):
 
     with pytest.raises(ValueError):
         parse_hotkey(bad)
+
+
+def test_extra_words_file(tmp_path):
+    from voice.text import build_prompt, load_extra_words
+
+    f = tmp_path / "w.txt"
+    f.write_text("# 주석\n디스코드, 스팀\n노션  # 메모\n\n디스코드\n", encoding="utf-8")
+    words = load_extra_words(f)
+    assert words == ["디스코드", "스팀", "노션", "디스코드"]
+    prompt = build_prompt(words)
+    assert "메모장" in prompt and prompt.count("디스코드") == 1  # 기본 단어 + 중복 없이 추가
+    assert load_extra_words(tmp_path / "없음.txt") == []
+
+
+def test_prompt_length_capped():
+    from voice.text import MAX_PROMPT_CHARS, build_prompt
+
+    assert len(build_prompt([f"단어{i}" for i in range(500)])) <= MAX_PROMPT_CHARS
+
+
+def test_normalize_volume():
+    import numpy as np
+
+    from voice.text import normalize_volume
+
+    quiet = np.array([0.0, 0.1, -0.05], dtype=np.float32)
+    assert abs(float(np.max(np.abs(normalize_volume(quiet)))) - 0.9) < 1e-6
+    loud = np.array([0.0, 0.7], dtype=np.float32)
+    assert np.array_equal(normalize_volume(loud), loud)        # 충분히 크면 그대로
+    silent = np.array([0.0, 0.001], dtype=np.float32)
+    assert np.array_equal(normalize_volume(silent), silent)    # 무음은 키우지 않음

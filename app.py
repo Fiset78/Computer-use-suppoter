@@ -298,7 +298,7 @@ class App:
         self.mic_btn.configure(state="disabled")
         self.transcribing = True
         self.notify("알아듣는 중..." if self.stt.loaded else
-                        "알아듣는 중... (처음에는 음성 인식 모델을 내려받아서 몇 분 걸릴 수 있습니다)")
+                        "알아듣는 중... (처음에는 음성 인식 모델(약 1.6GB)을 내려받아서 몇 분 걸릴 수 있습니다)")
         threading.Thread(target=self._transcribe, args=(audio,), daemon=True).start()
 
     def _on_endpoint(self, event: str) -> None:
@@ -339,6 +339,7 @@ class App:
     def _preload(self) -> None:
         try:
             self.stt.load()
+            print(f"음성 인식 모델 준비 완료: {self.stt.model_name}")
         except Exception as err:
             print(f"음성 인식 모델을 불러오지 못했습니다: {err}")
 
@@ -358,6 +359,7 @@ class App:
         if not text:
             self.notify("알아듣지 못했습니다. 다시 말해 주세요.", 4)
             return
+        print(f"🎤 알아들은 말: {text}")
         self.goal.set(text)
         self.entry.icursor("end")
         if self.auto_run.get():

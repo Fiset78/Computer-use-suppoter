@@ -10,11 +10,12 @@ import threading
 import types
 
 from voice.endpoint import EndpointDetector
-from voice.text import SAMPLE_RATE, clean_transcript, is_too_short
+from voice.text import SAMPLE_RATE, build_prompt, clean_transcript, is_too_short, load_extra_words, normalize_volume
 
-# 모델 크기: tiny < base < small < medium < large-v3. 클수록 정확하지만 느리다.
-# small은 한국어가 쓸 만하고 CPU에서도 짧은 명령은 몇 초 안에 끝난다.
-MODEL_NAME = os.getenv("PC_AGENT_WHISPER_MODEL", "small")
+# 모델: tiny < base < small < medium < large-v3-turbo < large-v3. 클수록 정확하지만 느리다.
+# large-v3-turbo는 large-v3와 정확도가 거의 같고 더 빠르다 (처음 한 번 약 1.6GB 내려받음).
+# CPU가 느리면 PC_AGENT_WHISPER_MODEL=medium 또는 small로 낮춘다.
+MODEL_NAME = os.getenv("PC_AGENT_WHISPER_MODEL", "large-v3-turbo")
 
 
 BLOCKED_HINT = (
@@ -105,9 +106,14 @@ class Transcriber:
         with self._lock:
             if self._model is None:
                 WhisperModel = import_whisper_model()
-                self._model = WhisperModel(self.model_name, device="cpu", compute_type="int8")
+                threads = min(8, os.cpu_count() or 4)
+                self._model = WhisperModel(self.model_name, device="cpu", compute_type="int8",
+                                           cpu_threads=threads)
 
     def transcribe(self, audio) -> str:
         self.load()
-        segments, _ = self._model.transcribe(audio, language=self.language, vad_filter=True, beam_size=5)
+        # 단어 힌트는 매번 다시 읽는다 (voice_words.txt를 고치면 창을 다시 켜지 않아도 반영)
+        segments, _ = self._model.transcribe(
+            normalize_volume(audio), language=self.language, beam_size=5, vad_filter=True,
+            initial_prompt=build_prompt(load_extra_words()), condition_on_previous_text=False)
         return clean_transcript([s.text for s in segments])

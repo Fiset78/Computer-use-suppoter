@@ -9,7 +9,7 @@ Claude로 Windows PC를 조작하는 에이전트 하네스. 리서치/실험용
 - `uv sync` 후 `uv run main.py "목표"`
 - 실행 창(터미널 없이, 음성 입력): `uv run app.py`. 바탕화면 바로가기는 `install_shortcut.ps1` (pythonw로 콘솔 없이 실행)
 - sdk 엔진은 미리 `claude`를 실행해 구독 계정으로 로그인해 둔다. api 엔진은 `ANTHROPIC_API_KEY` 필요
-- 환경 변수: `PC_AGENT_ENGINE` (sdk, api), `PC_AGENT_WEB` (1이면 WebSearch/WebFetch 켜기, sdk 전용), `PC_AGENT_MODEL`, `PC_AGENT_MAX_STEPS`, `PC_AGENT_MAX_LONG_EDGE`, `PC_AGENT_MONITOR`, `PC_AGENT_ASSIST` (보조 도구: uia, wait, all), `PC_AGENT_CONTEXT` (server, prune, none), `PC_AGENT_INPUT` (pyautogui, directinput), `PC_AGENT_WHISPER_MODEL` (음성 인식 모델 크기, 기본 small), `PC_AGENT_HOTKEY` (실행 창 전역 단축키, 기본 ctrl+alt+space)
+- 환경 변수: `PC_AGENT_ENGINE` (sdk, api), `PC_AGENT_WEB` (1이면 WebSearch/WebFetch 켜기, sdk 전용), `PC_AGENT_MODEL`, `PC_AGENT_MAX_STEPS`, `PC_AGENT_MAX_LONG_EDGE`, `PC_AGENT_MONITOR`, `PC_AGENT_ASSIST` (보조 도구: uia, wait, all), `PC_AGENT_CONTEXT` (server, prune, none), `PC_AGENT_INPUT` (pyautogui, directinput), `PC_AGENT_WHISPER_MODEL` (음성 인식 모델, 기본 large-v3-turbo), `PC_AGENT_HOTKEY` (실행 창 전역 단축키, 기본 ctrl+alt+space)
 - 실행 기록: `runs/<시각>/` (스크린샷 PNG + actions.jsonl)
 - 벤치마크: `uv run bench.py [--tasks a,b] [--repeat N] [--label 이름] [--assist uia,wait] [--context server|prune|none] [--input pyautogui|directinput] [--engine sdk|api] [--web on|off]` → `runs/bench-<시각>/` (results.jsonl, summary.json)
 - 테스트: `uv run pytest` (순수 모듈만)
@@ -17,7 +17,7 @@ Claude로 Windows PC를 조작하는 에이전트 하네스. 리서치/실험용
 ## 구조
 - `main.py`: 진입점. DPI 설정을 가장 먼저 호출한다 (pyautogui import 전)
 - `app.py`: 실행 창 (tkinter). 창은 최소화 상태를 유지하고(단축키·실행·대화상자 모두 창을 띄우지 않음) 상태는 화면 구석 알림(`Overlay`, 에이전트 실행 중에는 숨김)으로 보여 준다. 정지 버튼(`Executor.stop_check` → `StopRequested`), 위험 행동 확인 대화상자(`Guard(ask=)`), print를 창으로 돌림
-- `voice/stt.py`: 마이크 녹음(sounddevice) + 음성 인식(faster-whisper, 로컬). `voice/text.py`: 인식 결과 정리 (순수). `voice/endpoint.py`: 말 끝 감지 (소음 측정 → 말 시작 → 1.2초 무음이면 종료, 순수). `voice/tts.py`: 결과 읽어 주기 (Windows System.Speech). `voice/hotkey.py`: 전역 단축키 (Win32 RegisterHotKey, ctypes. 새 DLL을 들이지 않으려고 라이브러리를 쓰지 않음)
+- `voice/stt.py`: 마이크 녹음(sounddevice) + 음성 인식(faster-whisper, 로컬). `voice/text.py`: 인식 결과 정리, 단어 힌트(initial_prompt, 기본 단어 + `voice_words.txt`), 음량 맞추기 (순수). `voice/endpoint.py`: 말 끝 감지 (소음 측정 → 말 시작 → 1.2초 무음이면 종료, 순수). `voice/tts.py`: 결과 읽어 주기 (Windows System.Speech). `voice/hotkey.py`: 전역 단축키 (Win32 RegisterHotKey, ctypes. 새 DLL을 들이지 않으려고 라이브러리를 쓰지 않음)
 - `bench.py`: 벤치마크 진입점. 과제 반복 실행, 자동/수동 판정, 결과 저장
 - `agent/hidden.py`: 실행 창에서 Claude Code CLI를 띄울 때 콘솔 창이 뜨지 않게 `anyio.open_process`에 `CREATE_NO_WINDOW`를 끼워 넣음 (SDK에 옵션이 없어서)
 - `agent/engine.py`: 엔진 선택 (`get_runner`). 엔진별 의존성은 고를 때만 import
