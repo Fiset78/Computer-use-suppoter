@@ -3,7 +3,8 @@
 목표를 입력하거나 말로 하면 에이전트를 실행한다. 바탕화면 바로가기로 켠다 (install_shortcut.ps1).
     uv run app.py              # 터미널에서 켜기 (확인용)
 
-- 실행 중에는 창을 최소화한다. 창이 화면을 가리면 Claude가 그 창을 보거나 잘못 클릭할 수 있기 때문이다.
+- 실행 중에는 창을 최소화하고, 끝나도 다시 띄우지 않는다. 창이 화면을 가리면 Claude가 그 창을 보거나
+  잘못 클릭할 수 있기 때문이다. 창이 최소화돼 있으면 상태는 화면 구석 알림으로 보여 준다 (실행 중에는 숨김).
 - 정지 버튼은 다음 행동 직전에 멈춘다. 긴급 정지(마우스를 왼쪽 위 모서리로)도 그대로 동작한다.
 - 위험 행동 확인(y/n)은 대화상자로 묻는다.
 - 전역 단축키(기본 Ctrl+Alt+Space, PC_AGENT_HOTKEY): 어느 창에서든 눌러 말하기 시작/멈추기,
@@ -59,6 +60,58 @@ def beep(kind: str) -> None:
             winsound.MessageBeep(winsound.MB_ICONASTERISK)
     except RuntimeError:
         pass
+
+
+class Overlay:
+    """창이 최소화돼 있을 때 화면 오른쪽 아래에 잠깐 띄우는 작은 알림.
+    에이전트가 실행 중일 때는 띄우지 않는다 (스크린샷에 찍히거나 클릭될 수 있으므로)."""
+
+    def __init__(self, root: tk.Tk):
+        self.root = root
+        self.top: tk.Toplevel | None = None
+        self.label: tk.Label | None = None
+        self.job = None
+
+    def _build(self) -> None:
+        self.top = tk.Toplevel(self.root)
+        self.top.overrideredirect(True)          # 제목 표시줄 없음
+        self.top.attributes("-topmost", True)
+        try:
+            self.top.attributes("-alpha", 0.93)
+        except tk.TclError:
+            pass
+        self.label = tk.Label(self.top, font=FONT, fg="#f2f5f7", bg="#1f2a33", justify="left",
+                              wraplength=460, padx=16, pady=10)
+        self.label.pack()
+        self.top.withdraw()
+
+    def show(self, text: str, seconds: float | None = None) -> None:
+        if self.top is None:
+            self._build()
+        if self.job is not None:
+            self.root.after_cancel(self.job)
+            self.job = None
+        self.label.configure(text=text)
+        self.top.update_idletasks()
+        w, h = self.top.winfo_reqwidth(), self.top.winfo_reqheight()
+        x = self.top.winfo_screenwidth() - w - 24
+        y = self.top.winfo_screenheight() - h - 80   # 작업 표시줄 위
+        self.top.geometry(f"+{x}+{y}")
+        self.top.deiconify()
+        self.top.lift()
+        if seconds:
+            self.job = self.root.after(int(seconds * 1000), self.hide)
+
+    def hide(self) -> None:
+        if self.job is not None:
+            self.root.after_cancel(self.job)
+            self.job = None
+        if self.top is not None:
+            self.top.withdraw()
+
+    @property
+    def visible(self) -> bool:
+        return self.top is not None and self.top.state() == "normal"
 
 
 class QueueWriter:
@@ -134,6 +187,7 @@ class App:
         for cb in self.options:
             cb.pack(side="left", padx=(0, 14))
         self.countdown_job = None
+        self.overlay = Overlay(root)
 
         self.status = tk.StringVar(value="목표를 입력하거나 '말하기'를 누르세요.")
         ttk.Label(frame, textvariable=self.status, font=FONT).grid(row=4, column=0, sticky="w", pady=(10, 4))
@@ -185,17 +239,18 @@ class App:
         if self.countdown_job is not None:
             self.cancel_countdown("취소했습니다. 고치거나 다시 말하세요.")
             return
-        if not self.mic.recording:
-            self.show()  # 무엇을 듣고 있는지 보이게 창을 앞으로
-        self.toggle_mic()
+        self.toggle_mic()  # 창은 그대로 둔다 (최소화돼 있으면 알림으로 상태를 보여 줌)
 
-    def show(self) -> None:
-        self.root.deiconify()
-        self.root.lift()
-        self.root.attributes("-topmost", True)
-        self.root.after(200, lambda: self.root.attributes("-topmost", False))
-        self.root.focus_force()
-        self.entry.focus_set()
+    def notify(self, text: str, seconds: float | None = None) -> None:
+        """창의 상태 줄에 쓰고, 창이 최소화돼 있으면 화면 구석 알림으로도 보여 준다.
+        에이전트 실행 중에는 알림을 띄우지 않는다."""
+        self.status.set(text)
+        if self.running:
+            return
+        if self.root.state() == "iconic":
+            self.overlay.show(text, seconds)
+        else:
+            self.overlay.hide()
 
     # ---------- 기록 칸 ----------
     def drain_log(self) -> None:
@@ -223,11 +278,11 @@ class App:
             try:
                 self.mic.start(on_event=(lambda ev: self.root.after(0, self._on_endpoint, ev)) if auto else None)
             except Exception as err:
-                self.status.set(f"마이크를 열지 못했습니다: {err}")
+                self.notify(f"마이크를 열지 못했습니다: {err}", 6)
                 return
             self.mic_btn.configure(text="■ 멈추기")
-            self.status.set("듣고 있습니다... 말을 마치면 자동으로 멈춥니다." if auto else
-                            "듣고 있습니다... 다 말하면 '멈추기'를 누르세요.")
+            self.notify("🎤 듣고 있습니다... 말을 마치면 자동으로 멈춥니다." if auto else
+                        "🎤 듣고 있습니다... 다 말하면 단축키나 '멈추기'를 누르세요.")
             if not self.stt.loaded:
                 # 말하는 동안 모델을 미리 불러온다 (처음에는 내려받느라 오래 걸림)
                 threading.Thread(target=self._preload, daemon=True).start()
@@ -237,11 +292,11 @@ class App:
         audio = self.mic.stop()
         beep("stop")
         if audio is None:
-            self.status.set("녹음이 너무 짧습니다. 다시 말해 주세요.")
+            self.notify("녹음이 너무 짧습니다. 다시 말해 주세요.", 4)
             return
         self.mic_btn.configure(state="disabled")
         self.transcribing = True
-        self.status.set("알아듣는 중..." if self.stt.loaded else
+        self.notify("알아듣는 중..." if self.stt.loaded else
                         "알아듣는 중... (처음에는 음성 인식 모델을 내려받아서 몇 분 걸릴 수 있습니다)")
         threading.Thread(target=self._transcribe, args=(audio,), daemon=True).start()
 
@@ -253,7 +308,7 @@ class App:
             self.mic.stop()
             beep("stop")
             self.mic_btn.configure(text="🎤 말하기")
-            self.status.set("말소리가 들리지 않아 멈췄습니다. 마이크를 확인하고 다시 말해 주세요.")
+            self.notify("말소리가 들리지 않아 멈췄습니다. 마이크를 확인하고 다시 말해 주세요.", 5)
             return
         if event == MAX:
             print("녹음이 최대 길이에 닿아 멈췄습니다.")
@@ -269,7 +324,7 @@ class App:
             self.countdown_job = None
             self.run()
             return
-        self.status.set(f"{remaining}초 뒤 실행합니다: \"{self.goal.get()}\"  (취소: Esc 또는 단축키)")
+        self.notify(f"{remaining}초 뒤 실행합니다\n\"{self.goal.get()}\"\n취소: 단축키 또는 Esc")
         self.countdown_job = self.root.after(1000, self.start_countdown, remaining - 1)
 
     def cancel_countdown(self, message: str | None = None) -> None:
@@ -278,7 +333,7 @@ class App:
         self.root.after_cancel(self.countdown_job)
         self.countdown_job = None
         if message:
-            self.status.set(message)
+            self.notify(message, 4)
 
     def _preload(self) -> None:
         try:
@@ -297,17 +352,17 @@ class App:
         self.transcribing = False
         self.mic_btn.configure(state="normal")
         if err is not None:
-            self.status.set(f"음성 인식 실패: {err}")
+            self.notify(f"음성 인식 실패: {err}", 6)
             return
         if not text:
-            self.status.set("알아듣지 못했습니다. 다시 말해 주세요.")
+            self.notify("알아듣지 못했습니다. 다시 말해 주세요.", 4)
             return
         self.goal.set(text)
         self.entry.icursor("end")
         if self.auto_run.get():
             self.start_countdown(AUTO_RUN_DELAY)
             return
-        self.status.set("이렇게 알아들었습니다. 맞으면 '실행'(Enter), 틀리면 고치거나 다시 말하세요.")
+        self.notify(f"이렇게 알아들었습니다: \"{text}\"\n맞으면 창에서 실행(Enter)을 누르세요.", 8)
 
     # ---------- 실행 ----------
     def set_running(self, running: bool) -> None:
@@ -329,6 +384,7 @@ class App:
         config.ASSIST = list(config.ASSIST_GROUPS) if self.assist.get() else []
         self.stop_event.clear()
         self.set_running(True)
+        self.overlay.hide()
         self.status.set("실행 중... (창은 최소화됩니다)")
         print(f"\n===== 목표: {goal} =====")
         self.root.iconify()
@@ -369,9 +425,8 @@ class App:
 
     def _finish(self, summary: str, spoken: str) -> None:
         self.set_running(False)
-        self.status.set(summary)
-        self.root.deiconify()
-        self.root.lift()
+        brief = spoken if len(spoken) <= 160 else spoken[:160] + "…"
+        self.notify(f"{summary}\n{brief}".strip(), 10)
         if self.speak.get() and spoken:
             tts.speak(spoken)
 
@@ -386,18 +441,22 @@ class App:
         answer = {"yes": False}
 
         def show():
-            self.root.deiconify()
-            self.root.attributes("-topmost", True)
-            answer["yes"] = messagebox.askyesno(
-                "위험할 수 있는 행동", f"{what}\n\n실행할까요?", icon="warning", parent=self.root)
-            self.root.attributes("-topmost", False)
-            self.root.iconify()
-            done.set()
+            # 메인 창은 최소화한 채로 두고, 보이지 않는 작은 창을 부모로 대화상자만 맨 앞에 띄운다
+            holder = tk.Toplevel(self.root)
+            holder.overrideredirect(True)
+            holder.attributes("-topmost", True)
+            holder.geometry("1x1+{}+{}".format(self.root.winfo_screenwidth() // 2,
+                                               self.root.winfo_screenheight() // 3))
+            try:
+                answer["yes"] = messagebox.askyesno(
+                    "위험할 수 있는 행동", f"{what}\n\n실행할까요?", icon="warning", parent=holder)
+            finally:
+                holder.destroy()
+                done.set()
 
         self.root.after(0, show)
         done.wait()
-        if answer["yes"]:
-            time.sleep(MINIMIZE_WAIT)  # 창이 다시 내려간 뒤에 행동한다
+        time.sleep(0.3)  # 대화상자가 사라진 뒤에 행동한다
         return answer["yes"]
 
     def on_close(self) -> None:

@@ -16,7 +16,7 @@ Claude로 Windows PC를 조작하는 에이전트 하네스. 리서치/실험용
 
 ## 구조
 - `main.py`: 진입점. DPI 설정을 가장 먼저 호출한다 (pyautogui import 전)
-- `app.py`: 실행 창 (tkinter). 실행 중 창 최소화, 정지 버튼(`Executor.stop_check` → `StopRequested`), 위험 행동 확인 대화상자(`Guard(ask=)`), print를 창으로 돌림
+- `app.py`: 실행 창 (tkinter). 창은 최소화 상태를 유지하고(단축키·실행·대화상자 모두 창을 띄우지 않음) 상태는 화면 구석 알림(`Overlay`, 에이전트 실행 중에는 숨김)으로 보여 준다. 정지 버튼(`Executor.stop_check` → `StopRequested`), 위험 행동 확인 대화상자(`Guard(ask=)`), print를 창으로 돌림
 - `voice/stt.py`: 마이크 녹음(sounddevice) + 음성 인식(faster-whisper, 로컬). `voice/text.py`: 인식 결과 정리 (순수). `voice/endpoint.py`: 말 끝 감지 (소음 측정 → 말 시작 → 1.2초 무음이면 종료, 순수). `voice/tts.py`: 결과 읽어 주기 (Windows System.Speech). `voice/hotkey.py`: 전역 단축키 (Win32 RegisterHotKey, ctypes. 새 DLL을 들이지 않으려고 라이브러리를 쓰지 않음)
 - `bench.py`: 벤치마크 진입점. 과제 반복 실행, 자동/수동 판정, 결과 저장
 - `agent/engine.py`: 엔진 선택 (`get_runner`). 엔진별 의존성은 고를 때만 import
