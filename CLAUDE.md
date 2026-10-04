@@ -1,19 +1,25 @@
 # pc-agent
 
-Claude API의 computer use(`computer_toolset_20260801`)를 직접 구동하는 Windows용 에이전트 하네스. 리서치/실험용.
+Claude로 Windows PC를 조작하는 에이전트 하네스. 리서치/실험용. 엔진 두 가지:
+- `sdk` (기본): Claude Agent SDK + Claude Code 구독 로그인. API 키 불필요. custom 도구 `computer`(행동 배열)를 in-process MCP로 제공
+- `api`: Messages API의 computer use(`computer_toolset_20260801`)를 직접 구동. `ANTHROPIC_API_KEY` 필요
 최종 목표: 순수 computer use 기준 성능을 먼저 측정한 뒤, 보조 기능(UIA 요소 트리, 화면 변화 감지 등)을 붙여 개선 폭을 비교한다. 이후 마인크래프트 에이전트로 확장할 예정이다.
 
 ## 실행
 - `uv sync` 후 `uv run main.py "목표"`
-- 환경 변수: `ANTHROPIC_API_KEY` (필수), `PC_AGENT_MODEL`, `PC_AGENT_MAX_STEPS`, `PC_AGENT_MAX_LONG_EDGE`, `PC_AGENT_MONITOR`, `PC_AGENT_ASSIST` (보조 도구: uia, wait, all), `PC_AGENT_CONTEXT` (server, prune, none), `PC_AGENT_INPUT` (pyautogui, directinput)
+- sdk 엔진은 미리 `claude`를 실행해 구독 계정으로 로그인해 둔다. api 엔진은 `ANTHROPIC_API_KEY` 필요
+- 환경 변수: `PC_AGENT_ENGINE` (sdk, api), `PC_AGENT_MODEL`, `PC_AGENT_MAX_STEPS`, `PC_AGENT_MAX_LONG_EDGE`, `PC_AGENT_MONITOR`, `PC_AGENT_ASSIST` (보조 도구: uia, wait, all), `PC_AGENT_CONTEXT` (server, prune, none), `PC_AGENT_INPUT` (pyautogui, directinput)
 - 실행 기록: `runs/<시각>/` (스크린샷 PNG + actions.jsonl)
-- 벤치마크: `uv run bench.py [--tasks a,b] [--repeat N] [--label 이름] [--assist uia,wait] [--context server|prune|none] [--input pyautogui|directinput]` → `runs/bench-<시각>/` (results.jsonl, summary.json)
+- 벤치마크: `uv run bench.py [--tasks a,b] [--repeat N] [--label 이름] [--assist uia,wait] [--context server|prune|none] [--input pyautogui|directinput] [--engine sdk|api]` → `runs/bench-<시각>/` (results.jsonl, summary.json)
 - 테스트: `uv run pytest` (순수 모듈만)
 
 ## 구조
 - `main.py`: 진입점. DPI 설정을 가장 먼저 호출한다 (pyautogui import 전)
 - `bench.py`: 벤치마크 진입점. 과제 반복 실행, 자동/수동 판정, 결과 저장
-- `agent/loop.py`: 에이전트 루프, 시스템 프롬프트, 배치 처리. `run()`은 `RunResult`(상태, 단계, 행동, 토큰, 캐시 토큰)를 반환
+- `agent/engine.py`: 엔진 선택 (`get_runner`). 엔진별 의존성은 고를 때만 import
+- `agent/sdk_loop.py`: sdk 엔진. MCP 도구 등록, ClaudeSDKClient 실행, ResultMessage → `RunResult`
+- `agent/batch.py`: sdk 엔진의 `computer` 도구 스키마와 배치 실행 규칙 (순수 모듈)
+- `agent/loop.py`: api 엔진 에이전트 루프, 시스템 프롬프트, 배치 처리. `run()`은 `RunResult`(상태, 단계, 행동, 토큰, 캐시 토큰)를 반환
 - `agent/context.py`: 컨텍스트 관리 (캐시 중단점, 서버 측 clearing 설정, 클라이언트 가지치기). 순수 모듈
 - `benchmark/tasks.py`: 고정 과제 세트 (setup/check). 과제를 바꾸면 `TASK_SET_VERSION`을 올린다
 - `benchmark/metrics.py`: 결과 집계와 표 출력 (순수 모듈)
@@ -27,7 +33,15 @@ Claude API의 computer use(`computer_toolset_20260801`)를 직접 구동하는 W
 - `safety/guard.py`: 위험 키/텍스트 입력 전 y/n 확인
 - `logs/recorder.py`: 실행 기록
 
-## computer_toolset_20260801 규칙 (어기면 API가 요청을 거부함)
+## sdk 엔진 규칙
+- 내장 도구는 `tools=[]`로 전부 끄고, `allowed_tools`에 우리 MCP 도구(`mcp__pc__*`)만 넣고 `permission_mode="dontAsk"`
+- `setting_sources=[]`로 사용자/프로젝트 설정과 CLAUDE.md를 읽지 않는다 (실험 격리)
+- `env={"ANTHROPIC_API_KEY": ""}`로 API 키를 CLI에 넘기지 않는다 (구독 로그인 사용)
+- `computer` 도구는 첫 실패 이후 행동을 실행하지 않고, 관찰 행동으로 끝나지 않은 배치에 스크린샷을 붙인다 (api 엔진과 같은 규칙)
+- 긴급 정지는 도구 결과로 숨기지 않고 `_Tools.abort`에 담아 루프가 interrupt 후 다시 올린다
+- MCP 이미지 형식은 `{"type": "image", "data", "mimeType"}` (`batch.to_mcp_content`로 변환)
+
+## computer_toolset_20260801 규칙 (api 엔진) (어기면 API가 요청을 거부함)
 - beta 헤더 없음. `client.messages.create`의 `tools=[{"type": "computer_toolset_20260801"}]`
 - `name`, `display_width_px`, `display_height_px`, `display_number`, `enable_zoom`은 넣으면 안 됨
 - 응답의 tool_use 블록은 `name`이 멤버 이름(left_click 등), `toolset_name == "computer"`, `input`에 `action` 필드 없음
@@ -39,7 +53,7 @@ Claude API의 computer use(`computer_toolset_20260801`)를 직접 구동하는 W
 - 좌표는 항상 우리가 보낸 스크린샷의 픽셀 좌표. 스크린샷은 직접 축소해서 보내야 함 (API가 줄여주지 않음)
 - 문서: https://platform.claude.com/docs/en/agents-and-tools/tool-use/computer-use-tool
 
-## 컨텍스트 관리 규칙
+## 컨텍스트 관리 규칙 (api 엔진. sdk 엔진은 Claude Code가 관리)
 - `system`과 `tools`는 실행 중에 절대 바꾸지 않는다 (캐시와 preserved thinking이 모두 깨짐)
 - 캐시 중단점은 요청 직전 사본에만 붙인다 (`with_cache_breakpoints`). 최대 4개: system 1 + 최근 user 메시지 3
 - 서버 측 clearing: `client.beta.messages.create(betas=["context-management-2025-06-27"], context_management={"edits": [clear_tool_uses_20250919]})`. 대화 기록 자체는 바뀌지 않으므로 모든 모델에서 안전

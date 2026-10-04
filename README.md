@@ -12,12 +12,29 @@ powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | ie
 cd pc-agent
 uv sync
 
-# 3. API 키 설정 (현재 터미널에서만 유효)
-$env:ANTHROPIC_API_KEY = "sk-ant-..."
+# 3. Claude 구독 계정으로 로그인 (처음 한 번)
+#    Claude Code를 설치하고 실행한 뒤 /login 으로 Pro/Max 계정에 로그인합니다.
+irm https://claude.ai/install.ps1 | iex
+claude
 
 # 4. 실행
 uv run main.py "메모장을 열고 '안녕하세요'라고 입력해줘"
 ```
+
+### 엔진: 구독(sdk) / API(api)
+기본 엔진은 `sdk`입니다. Claude Agent SDK가 Claude Code를 띄워 루프를 돌리므로 **API 키 없이 구독 사용량**으로 동작합니다.
+`ANTHROPIC_API_KEY`가 설정돼 있어도 sdk 엔진은 이를 넘기지 않습니다 (API로 과금되지 않도록).
+
+예전처럼 API를 직접 쓰려면 (computer_toolset_20260801, 비교용):
+```powershell
+$env:ANTHROPIC_API_KEY = "sk-ant-..."
+$env:PC_AGENT_ENGINE = "api"
+```
+
+sdk 엔진의 차이점:
+- computer 툴셋은 API 전용이라 쓸 수 없어서, 같은 17개 행동을 배열로 받는 custom 도구 `computer`로 대신합니다 (첫 실패 후 중단, 자동 스크린샷 규칙은 같음).
+- 컨텍스트 관리는 Claude Code가 자동으로 합니다 (`PC_AGENT_CONTEXT`, 프롬프트 캐시 설정은 무시됨).
+- 토큰 수는 Claude Code가 보고한 값입니다. 구독 사용량 한도에 포함됩니다.
 
 ## 긴급 정지
 - 마우스를 **화면 왼쪽 위 모서리**로 급히 옮기면 즉시 멈춥니다.

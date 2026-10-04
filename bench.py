@@ -30,12 +30,11 @@ from perception.capture import enable_dpi_awareness
 
 enable_dpi_awareness()
 
-from anthropic import APIError  # noqa: E402
-
 import config  # noqa: E402
 from actions import backends  # noqa: E402
 from actions.executor import Executor  # noqa: E402
 from agent import context, loop  # noqa: E402
+from agent.engine import get_runner  # noqa: E402
 from benchmark.metrics import format_table, summarize  # noqa: E402
 from benchmark.tasks import TASK_SET_VERSION, CheckContext, get_tasks  # noqa: E402
 from logs.recorder import Recorder  # noqa: E402
@@ -76,6 +75,8 @@ def main() -> int:
                         help="컨텍스트 전략: server, prune, none (기본: PC_AGENT_CONTEXT 환경 변수)")
     parser.add_argument("--input", default=None,
                         help="입력 백엔드: pyautogui, directinput (기본: PC_AGENT_INPUT 환경 변수)")
+    parser.add_argument("--engine", default=None,
+                        help="엔진: sdk (구독 로그인), api (API 키) (기본: PC_AGENT_ENGINE 환경 변수)")
     parser.add_argument("--list", action="store_true", help="과제 목록만 출력")
     parser.add_argument("--no-pause", action="store_true", help="과제 사이에 Enter를 기다리지 않음")
     args = parser.parse_args()
@@ -86,6 +87,8 @@ def main() -> int:
         if args.context is not None:
             config.CONTEXT = args.context.strip().lower()
         context.resolve_strategy(config.CONTEXT, config.MODEL)  # 잘못된 값이면 여기서 ValueError
+        if args.engine is not None:
+            config.ENGINE = args.engine.strip().lower()
         if args.input is not None:
             config.INPUT_BACKEND = args.input.strip().lower()
         if config.INPUT_BACKEND not in backends.BACKENDS:
@@ -102,6 +105,11 @@ def main() -> int:
         return 0
 
     try:
+        run_agent, EngineError = get_runner(config.ENGINE)
+    except (ValueError, ImportError) as err:
+        print(f"엔진 '{config.ENGINE}'을 불러오지 못했습니다: {err}")
+        return 2
+    try:
         backend = backends.create(config.INPUT_BACKEND)
     except ImportError as err:
         print(f"입력 백엔드 '{config.INPUT_BACKEND}'를 불러오지 못했습니다: {err}")
@@ -113,6 +121,7 @@ def main() -> int:
 
     meta = {
         "label": args.label,
+        "engine": config.ENGINE,
         "task_set_version": TASK_SET_VERSION,
         "model": config.MODEL,
         "max_steps": config.MAX_STEPS,
@@ -121,8 +130,9 @@ def main() -> int:
         "action_delay": config.ACTION_DELAY,
         "auto_screenshot": config.AUTO_SCREENSHOT,
         "assist": config.ASSIST,
-        "context": context.resolve_strategy(config.CONTEXT, config.MODEL)[0],
-        "prompt_cache": config.PROMPT_CACHE,
+        # sdk 엔진은 Claude Code가 컨텍스트를 관리하므로 아래 설정이 쓰이지 않는다
+        "context": context.resolve_strategy(config.CONTEXT, config.MODEL)[0] if config.ENGINE == "api" else "claude_code",
+        "prompt_cache": config.PROMPT_CACHE if config.ENGINE == "api" else None,
         "input_backend": backend.name,
         "clear": {"trigger": config.CLEAR_TRIGGER, "keep": config.CLEAR_KEEP,
                   "at_least": config.CLEAR_AT_LEAST},
@@ -132,7 +142,7 @@ def main() -> int:
         "started": time.strftime("%Y-%m-%d %H:%M:%S"),
     }
     print(f"결과 폴더: {out_dir}")
-    print(f"모델 {config.MODEL} · 화면 {screen.width}x{screen.height} → {screen.shot_w}x{screen.shot_h} "
+    print(f"엔진 {config.ENGINE} · 모델 {config.MODEL} · 화면 {screen.width}x{screen.height} → {screen.shot_w}x{screen.shot_h} "
           f"· 과제 {len(tasks)}개 × {args.repeat}회 · 보조 도구 {','.join(config.ASSIST) or '없음'} · 컨텍스트 {meta['context']} · 입력 {backend.name}")
     print("긴급 정지: 마우스를 왼쪽 위 모서리로 / Ctrl+C\n")
 
@@ -161,14 +171,14 @@ def main() -> int:
                 result = loop.RunResult()
                 started = time.perf_counter()
                 try:
-                    loop.run(task.goal, executor, recorder, stats=result)
+                    run_agent(task.goal, executor, recorder, stats=result)
                 except KeyboardInterrupt as err:
                     result.status = "aborted"
                     result.final = type(err).__name__
                     stopped = True
-                except APIError as err:
+                except EngineError as err:
                     result.status = "error"
-                    result.final = f"API 오류: {err}"
+                    result.final = f"엔진 오류: {err}"
                     print(f"  {result.final}")
                 except Exception as err:
                     if not backends.is_failsafe(err):

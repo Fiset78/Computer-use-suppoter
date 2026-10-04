@@ -1,6 +1,12 @@
 """전역 설정. 환경 변수로 덮어쓸 수 있다."""
 import os
 
+# 에이전트 엔진: sdk | api
+#   sdk = Claude Agent SDK (Claude Code CLI + 구독 로그인, API 키 불필요). 기본값
+#   api = Anthropic Messages API 직접 호출 (computer_toolset_20260801, ANTHROPIC_API_KEY 필요)
+ENGINES = ("sdk", "api")
+ENGINE = os.getenv("PC_AGENT_ENGINE", "sdk").strip().lower()
+
 # 사용할 모델 (computer_toolset_20260801 지원 모델: Sonnet 5, Opus 5 / 5.5 등)
 MODEL = os.getenv("PC_AGENT_MODEL", "claude-sonnet-5")
 
