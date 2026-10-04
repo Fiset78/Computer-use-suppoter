@@ -52,3 +52,51 @@ def test_sdk_loop_records_and_notifies(tmp_path, monkeypatch):
     store = sdk_loop.record_usage(info("five_hour", 0.1))
     assert store["five_hour"]["utilization"] == 0.1 and seen == [store]
     assert usage.load(tmp_path / "usage.json")["five_hour"]["utilization"] == 0.1
+
+
+def test_from_get_usage():
+    resp = {
+        "subscription_type": "max",
+        "rate_limits_available": True,
+        "rate_limits": {
+            "five_hour": {"utilization": 27.0, "resets_at": "2026-10-04T16:40:00Z"},
+            "seven_day": {"utilization": 63.5, "resets_at": "2026-10-08T03:00:00+00:00"},
+            "seven_day_opus": None,
+            "model_scoped": [{"display_name": "Fable", "utilization": 10, "resets_at": None}],
+            "extra_usage": {"is_enabled": False},
+        },
+    }
+    store = usage.from_get_usage(resp, now=100)
+    assert set(store) == {"five_hour", "seven_day", "model:Fable"}
+    assert abs(usage.remaining(store["five_hour"]) - 0.73) < 1e-9
+    assert store["seven_day"]["resets_at"] > 1.7e9 and store["seven_day"]["checked_at"] == 100
+    assert usage.label("model:Fable") == "주간 (Fable)" and usage.label("five_hour") == "5시간 한도"
+    assert usage.from_get_usage({"rate_limits_available": False, "rate_limits": None}) == {}
+
+
+def test_fetch_usage_with_fake_client(tmp_path, monkeypatch):
+    import asyncio
+    from types import SimpleNamespace
+
+    import pytest
+    pytest.importorskip("claude_agent_sdk")
+    import config
+    from agent import sdk_loop
+
+    monkeypatch.setattr(config, "RUNS_DIR", str(tmp_path))
+    seen = []
+    monkeypatch.setattr(sdk_loop, "usage_listeners", [seen.append])
+
+    async def ok(req):
+        assert req == {"subtype": "get_usage"}
+        return {"rate_limits": {"five_hour": {"utilization": 40, "resets_at": None}}}
+
+    async def broken(req):
+        raise RuntimeError("get_usage is not supported in this context")
+
+    good = SimpleNamespace(_query=SimpleNamespace(_send_control_request=ok))
+    store = asyncio.run(sdk_loop.fetch_usage(good))
+    assert abs(store["five_hour"]["utilization"] - 0.4) < 1e-9 and seen == [store]
+    bad = SimpleNamespace(_query=SimpleNamespace(_send_control_request=broken))
+    assert asyncio.run(sdk_loop.fetch_usage(bad)) is None
+    assert usage.load(tmp_path / "usage.json")["five_hour"]["utilization"] == 0.4  # 실패해도 이전 값 유지

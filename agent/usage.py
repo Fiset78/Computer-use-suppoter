@@ -34,6 +34,54 @@ def from_info(info, now: float | None = None) -> dict | None:
     }
 
 
+# get_usage 응답의 한도 창 (claude.ai 사용량 엔드포인트와 같은 값)
+GET_USAGE_WINDOWS = ("five_hour", "seven_day", "seven_day_opus", "seven_day_sonnet")
+
+
+def _epoch(value) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return None
+
+
+def from_get_usage(response: dict, now: float | None = None) -> dict:
+    """Claude Code의 get_usage 제어 요청 응답 → 한도 종류별 dict.
+    utilization은 0~100(%)으로 오므로 0~1로 바꾼다. 한도 정보가 없으면 빈 dict."""
+    now = now if now is not None else time.time()
+    limits = (response or {}).get("rate_limits") or {}
+    entries = {}
+
+    def add(kind, window):
+        if not isinstance(window, dict):
+            return
+        util = window.get("utilization")
+        entries[kind] = {
+            "type": kind,
+            "status": None,
+            "utilization": None if util is None else float(util) / 100.0,
+            "resets_at": _epoch(window.get("resets_at")),
+            "checked_at": now,
+        }
+
+    for kind in GET_USAGE_WINDOWS:
+        add(kind, limits.get(kind))
+    for item in limits.get("model_scoped") or []:
+        if isinstance(item, dict) and item.get("display_name"):
+            add(f"model:{item['display_name']}", item)
+    return entries
+
+
+def label(kind: str) -> str:
+    if kind.startswith("model:"):
+        return f"주간 ({kind[6:]})"
+    return LIMIT_NAMES.get(kind, kind)
+
+
 def merge(store: dict, entry: dict | None) -> dict:
     """한도 종류별 최신 값만 남긴다."""
     if entry:

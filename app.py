@@ -45,6 +45,7 @@ FONT = ("Malgun Gothic", 11)
 # 창에서 고르는 생각 깊이 (보이는 이름 → PC_AGENT_EFFORT 값). 빠를수록 어려운 작업에서 실수가 늘 수 있다
 EFFORTS = {"생각: 빠르게": "low", "생각: 보통": "medium", "생각: 깊게": "high"}
 MINIMIZE_WAIT = 0.8  # 창이 내려가는 애니메이션이 끝날 때까지 기다린 뒤 첫 스크린샷을 찍는다
+USAGE_REFRESH_MS = 10 * 60 * 1000  # 실행하지 않을 때 구독 한도를 다시 받아 오는 간격
 AUTO_RUN_DELAY = 2   # 알아들은 뒤 자동 실행까지 기다리는 초 (그사이 Esc/단축키로 취소)
 
 
@@ -212,9 +213,13 @@ class App:
                                      text="아직 정보 없음 · 한 번 실행하면 Claude Code가 알려 줍니다")
         self.usage_empty.grid(row=0, column=0, columnspan=3, sticky="w")
         self.usage_checked = ttk.Label(self.usage_box, foreground="#777")
+        self.usage_refreshing = False
+        self.usage_btn = ttk.Button(self.usage_box, text="새로고침", command=self.refresh_usage, width=8)
+        self.usage_btn.grid(row=0, column=3, sticky="ne", padx=(8, 0))
         self.usage_store = usage.load(sdk_loop.usage_file())
         self.show_usage(self.usage_store)
         sdk_loop.usage_listeners.append(lambda store: self.root.after(0, self.show_usage, store))
+        self.root.after(1500, self.refresh_usage)  # 켜자마자 최신 한도를 받아 온다
 
         self.log = scrolledtext.ScrolledText(frame, height=10, font=("Malgun Gothic", 10), state="disabled")
         self.log.grid(row=7, column=0, sticky="nsew", pady=(8, 0))
@@ -284,7 +289,7 @@ class App:
         for i, entry in enumerate(entries):
             kind = entry["type"]
             if kind not in self.usage_rows:
-                name = ttk.Label(self.usage_box, text=usage.LIMIT_NAMES.get(kind, kind), width=12)
+                name = ttk.Label(self.usage_box, text=usage.label(kind), width=12)
                 bar = ttk.Progressbar(self.usage_box, maximum=100, length=240)
                 text = ttk.Label(self.usage_box)
                 self.usage_rows[kind] = (name, bar, text)
@@ -305,6 +310,28 @@ class App:
                 self._usage_job = None
                 self.show_usage(self.usage_store)
             self._usage_job = self.root.after(60_000, tick)
+
+    def refresh_usage(self) -> None:
+        """Claude Code에 구독 한도를 물어본다 (모델 호출 없음). 실행 중이면 실행이 알아서 갱신한다."""
+        if getattr(self, "_usage_timer", None) is not None:
+            self.root.after_cancel(self._usage_timer)
+        self._usage_timer = self.root.after(USAGE_REFRESH_MS, self.refresh_usage)
+        if self.running or self.usage_refreshing:
+            return
+        self.usage_refreshing = True
+        self.usage_btn.configure(state="disabled", text="확인 중")
+
+        def work():
+            store = sdk_loop.refresh_usage()
+            self.root.after(0, done, store)
+
+        def done(store):
+            self.usage_refreshing = False
+            self.usage_btn.configure(state="normal", text="새로고침")
+            if store is None and not self.usage_store:
+                self.usage_empty.configure(text="한도 정보를 받지 못했습니다 · Claude 구독으로 로그인했는지 확인하세요")
+
+        threading.Thread(target=work, daemon=True).start()
 
     # ---------- 기록 칸 ----------
     def drain_log(self) -> None:

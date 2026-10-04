@@ -10,6 +10,8 @@ Claude Agent SDK가 Claude Code CLI를 띄우고 에이전트 루프(요청 → 
 - 인증: ANTHROPIC_API_KEY를 CLI에 넘기지 않으므로, 미리 `claude`를 실행해 구독 계정으로 로그인해 둬야 한다.
 """
 import asyncio
+
+import anyio
 from pathlib import Path
 import time
 from typing import Any
@@ -64,24 +66,58 @@ def usage_file() -> Path:
     return Path(config.RUNS_DIR) / "usage.json"
 
 
+def _publish_usage(store: dict) -> None:
+    try:
+        usage.save(usage_file(), store)
+    except OSError:
+        pass
+    for listener in list(usage_listeners):
+        try:
+            listener(store)
+        except Exception:
+            pass
+
+
 def record_usage(info, recorder=None) -> dict | None:
     """RateLimitEvent의 정보를 usage.json에 합쳐 저장하고 실행 창에 알린다."""
     entry = usage.from_info(info)
     if entry is None:
         return None
     store = usage.merge(usage.load(usage_file()), entry)
-    try:
-        usage.save(usage_file(), store)
-    except OSError:
-        pass
     if recorder is not None:
         recorder.event("rate_limit", **entry)
-    for listener in list(usage_listeners):
-        try:
-            listener(store)
-        except Exception:
-            pass
+    _publish_usage(store)
     return store
+
+
+async def fetch_usage(client, timeout: float = 15.0) -> dict | None:
+    """Claude Code에 get_usage 제어 요청을 보내 구독 한도(5시간·주간)를 직접 받아 온다.
+    모델을 부르지 않으므로 사용량이 들지 않는다. SDK가 정식으로 감싸지 않은 요청이라
+    실패하거나 모양이 바뀌면 조용히 None을 돌려준다 (이벤트로 받은 값은 그대로 남음)."""
+    try:
+        with anyio.fail_after(timeout):
+            response = await client._query._send_control_request({"subtype": "get_usage"})
+    except Exception:
+        return None
+    entries = usage.from_get_usage(response)
+    if not entries:
+        return None
+    store = {**usage.load(usage_file()), **entries}
+    _publish_usage(store)
+    return store
+
+
+def refresh_usage() -> dict | None:
+    """실행하지 않을 때 한도만 새로 받아 온다 (Claude Code를 잠깐 띄웠다 닫음, 모델 호출 없음)."""
+    async def go():
+        options = ClaudeAgentOptions(tools=[], setting_sources=[], permission_mode="dontAsk",
+                                     max_buffer_size=MAX_BUFFER_SIZE, env={"ANTHROPIC_API_KEY": ""})
+        async with ClaudeSDKClient(options=options) as client:
+            return await fetch_usage(client)
+    try:
+        return asyncio.run(go())
+    except Exception:
+        return None
 
 
 def builtin_tools(web: bool) -> list[str]:
@@ -225,6 +261,7 @@ async def _run(goal: str, executor: Executor, recorder: Recorder, stats: RunResu
         }
 
     async with ClaudeSDKClient(options=options) as client:
+        usage_task = asyncio.create_task(fetch_usage(client))  # 실행 전 한도 (실행과 동시에)
         await client.query(prompt())
         seen: set[str] = set()  # CLI는 응답 하나를 블록마다 나눠 보내므로 message_id로 단계를 센다
         async for msg in client.receive_response():
@@ -267,7 +304,10 @@ async def _run(goal: str, executor: Executor, recorder: Recorder, stats: RunResu
                 recorder.event("done", step=stats.steps, status=stats.status, final=stats.final,
                                cost_usd=msg.total_cost_usd, usage=msg.usage)
         if handlers.abort is not None:
+            usage_task.cancel()
             raise handlers.abort
+        await usage_task
+        await fetch_usage(client)  # 실행 뒤 한도 (이번 실행으로 쓴 만큼 반영)
     return stats
 
 
