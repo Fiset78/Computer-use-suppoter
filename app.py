@@ -40,6 +40,10 @@ FONT = ("Malgun Gothic", 11)
 MINIMIZE_WAIT = 0.8  # 창이 내려가는 애니메이션이 끝날 때까지 기다린 뒤 첫 스크린샷을 찍는다
 
 
+def hotkey_label(text: str) -> str:
+    return "+".join(p.strip().capitalize() for p in text.split("+"))
+
+
 def beep(kind: str) -> None:
     """녹음 시작/끝 알림음 (창을 보지 않고 단축키로 쓸 때 필요). Windows가 아니면 무시."""
     if sys.platform != "win32":
@@ -133,18 +137,33 @@ class App:
 
     # ---------- 전역 단축키 ----------
     def _start_hotkey(self):
-        try:
-            hk = GlobalHotkey(config.HOTKEY, lambda: self.root.after(0, self.on_hotkey))
-        except ValueError as err:
-            print(f"단축키 설정 오류 (PC_AGENT_HOTKEY={config.HOTKEY}): {err}")
-            return None
-        if not hk.start():
-            print(hk.error)
-            return None
-        label = "+".join(p.strip().capitalize() for p in config.HOTKEY.split("+"))
-        self.hint.set(f"단축키 {label}: 말하기/멈추기 · 실행 중에는 정지 · "
-                      "긴급 정지: 마우스를 왼쪽 위 모서리로")
-        return hk
+        # 직접 정한 단축키는 그것만 쓴다. 기본값이면 다른 프로그램과 겹칠 때 다음 후보로 넘어간다
+        candidates = [config.HOTKEY] + ([] if config.HOTKEY_FROM_ENV else list(config.HOTKEY_FALLBACKS))
+        failed = []
+        for text in candidates:
+            try:
+                hk = GlobalHotkey(text, lambda: self.root.after(0, self.on_hotkey))
+            except ValueError as err:
+                print(f"단축키 설정 오류 (PC_AGENT_HOTKEY={text}): {err}")
+                continue
+            if hk.start():
+                label = hotkey_label(text)
+                if failed:
+                    print(f"{', '.join(map(hotkey_label, failed))}는 다른 프로그램이 쓰고 있어서 "
+                          f"{label}로 등록했습니다.")
+                self.hint.set(f"단축키 {label}: 말하기/멈추기 · 실행 중에는 정지 · "
+                              "긴급 정지: 마우스를 왼쪽 위 모서리로")
+                return hk
+            if sys.platform != "win32":
+                print(hk.error)
+                return None
+            failed.append(text)
+        if failed:
+            print(f"단축키를 등록하지 못했습니다 (시도: {', '.join(map(hotkey_label, failed))}).\n"
+                  "실행 창이 이미 하나 켜져 있지 않은지 확인하세요. 다른 단축키를 쓰려면 "
+                  "PowerShell에서 setx PC_AGENT_HOTKEY \"ctrl+shift+f10\" 후 창을 다시 켜세요.")
+            self.hint.set("단축키 없음 (기록 칸 참고) · 긴급 정지: 마우스를 왼쪽 위 모서리로")
+        return None
 
     def on_hotkey(self) -> None:
         if self.running:
@@ -337,8 +356,30 @@ class App:
         self.root.destroy()
 
 
+def already_running() -> bool:
+    """실행 창이 이미 켜져 있는지 (이름 있는 뮤텍스). 두 개가 켜지면 단축키가 겹쳐서 하나만 허용한다."""
+    if sys.platform != "win32":
+        return False
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateMutexW.restype = wintypes.HANDLE
+    kernel32.CreateMutexW.argtypes = [wintypes.LPVOID, wintypes.BOOL, wintypes.LPCWSTR]
+    already_exists = 183  # ERROR_ALREADY_EXISTS
+    # 핸들은 프로세스가 끝날 때까지 쥐고 있어야 하므로 모듈 전역에 둔다
+    globals()["_instance_mutex"] = kernel32.CreateMutexW(None, False, "Local\\pc-agent-app")
+    return ctypes.get_last_error() == already_exists
+
+
 def main() -> None:
     os.chdir(Path(__file__).resolve().parent)  # 바로가기로 켜도 runs/ 폴더가 프로젝트 안에 생기게
+    if already_running():
+        root = tk.Tk()
+        root.withdraw()
+        messagebox.showinfo("pc-agent", "실행 창이 이미 켜져 있습니다. 작업 표시줄에서 찾아 주세요.")
+        root.destroy()
+        return
     root = tk.Tk()
     App(root)
     root.mainloop()

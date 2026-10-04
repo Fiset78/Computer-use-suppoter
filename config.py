@@ -77,6 +77,9 @@ PRUNE_BATCH = int(os.getenv("PC_AGENT_PRUNE_BATCH", "10"))
 
 # 실행 창의 음성 입력 전역 단축키. 누르면 말하기 시작/멈추기, 실행 중에 누르면 정지
 HOTKEY = os.getenv("PC_AGENT_HOTKEY", "ctrl+alt+space")
+# 직접 정하지 않았을 때, 기본 단축키를 다른 프로그램이 쓰고 있으면 차례로 시도할 단축키
+HOTKEY_FALLBACKS = ("ctrl+alt+f9", "ctrl+shift+f9", "ctrl+alt+f12")
+HOTKEY_FROM_ENV = bool(os.getenv("PC_AGENT_HOTKEY"))
 
 # 입력 백엔드 (로드맵 7단계): pyautogui (일반 앱, 기본) | directinput (게임, pydirectinput-rgx)
 INPUT_BACKEND = os.getenv("PC_AGENT_INPUT", "pyautogui").strip().lower()
