@@ -9,6 +9,7 @@ import sys
 import threading
 import types
 
+from voice.endpoint import EndpointDetector
 from voice.text import SAMPLE_RATE, clean_transcript, is_too_short
 
 # 모델 크기: tiny < base < small < medium < large-v3. 클수록 정확하지만 느리다.
@@ -52,13 +53,23 @@ class MicRecorder:
     def recording(self) -> bool:
         return self._stream is not None
 
-    def start(self) -> None:
+    def start(self, on_event=None) -> None:
+        """녹음을 시작한다. on_event를 주면 말 끝을 감지해 "end"/"no_speech"/"max"로 한 번 알려 준다.
+        on_event는 오디오 스레드에서 불리므로 가볍게 처리해야 한다 (창에 넘기기만 할 것)."""
         import sounddevice as sd
 
         self._chunks = []
+        detector = EndpointDetector(self.sample_rate) if on_event is not None else None
+        signaled = False
 
         def callback(indata, frames, time_info, status):
+            nonlocal signaled
             self._chunks.append(indata.copy())
+            if detector is not None and not signaled:
+                event = detector.feed(indata[:, 0])
+                if event:
+                    signaled = True
+                    on_event(event)
 
         self._stream = sd.InputStream(samplerate=self.sample_rate, channels=1, dtype="float32",
                                       callback=callback)

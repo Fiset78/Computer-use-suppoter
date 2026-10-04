@@ -33,11 +33,13 @@ from logs.recorder import Recorder  # noqa: E402
 from perception.capture import Screen  # noqa: E402
 from safety.guard import Guard  # noqa: E402
 from voice import tts  # noqa: E402
+from voice.endpoint import MAX, NO_SPEECH  # noqa: E402
 from voice.hotkey import GlobalHotkey  # noqa: E402
 from voice.stt import MicRecorder, Transcriber  # noqa: E402
 
 FONT = ("Malgun Gothic", 11)
 MINIMIZE_WAIT = 0.8  # 창이 내려가는 애니메이션이 끝날 때까지 기다린 뒤 첫 스크린샷을 찍는다
+AUTO_RUN_DELAY = 2   # 알아들은 뒤 자동 실행까지 기다리는 초 (그사이 Esc/단축키로 취소)
 
 
 def hotkey_label(text: str) -> str:
@@ -50,7 +52,11 @@ def beep(kind: str) -> None:
         return
     import winsound
     try:
-        winsound.MessageBeep(winsound.MB_OK if kind == "start" else winsound.MB_ICONASTERISK)
+        if kind == "start":
+            # 녹음을 켜기 전에 끝까지 울린다. 알림음이 녹음돼 말소리로 잡히지 않게 하려는 것
+            winsound.PlaySound("SystemAsterisk", winsound.SND_ALIAS | winsound.SND_NODEFAULT)
+        else:
+            winsound.MessageBeep(winsound.MB_ICONASTERISK)
     except RuntimeError:
         pass
 
@@ -88,7 +94,7 @@ class App:
         frame = ttk.Frame(root, padding=12)
         frame.pack(fill="both", expand=True)
         frame.columnconfigure(0, weight=1)
-        frame.rowconfigure(5, weight=1)
+        frame.rowconfigure(6, weight=1)
 
         row = ttk.Frame(frame)
         row.grid(row=0, column=0, sticky="ew")
@@ -97,6 +103,8 @@ class App:
         self.entry = ttk.Entry(row, textvariable=self.goal, font=FONT)
         self.entry.grid(row=0, column=0, sticky="ew", ipady=4)
         self.entry.bind("<Return>", lambda e: self.run())
+        self.entry.bind("<Key>", self._on_entry_key)
+        root.bind("<Escape>", lambda e: self.cancel_countdown("취소했습니다."))
         self.mic_btn = ttk.Button(row, text="🎤 말하기", command=self.toggle_mic, width=12)
         self.mic_btn.grid(row=0, column=1, padx=(8, 0))
 
@@ -112,23 +120,28 @@ class App:
         self.web = tk.BooleanVar(value=config.WEB)
         self.assist = tk.BooleanVar(value=bool(config.ASSIST))
         self.speak = tk.BooleanVar(value=True)
-        self.auto_run = tk.BooleanVar(value=False)
+        self.auto_stop = tk.BooleanVar(value=True)
+        self.auto_run = tk.BooleanVar(value=True)
+        row4 = ttk.Frame(frame)
+        row4.grid(row=3, column=0, sticky="ew", pady=(4, 0))
         self.options = [
             ttk.Checkbutton(row3, text="웹 검색", variable=self.web),
             ttk.Checkbutton(row3, text="보조 도구", variable=self.assist),
             ttk.Checkbutton(row3, text="결과 읽어 주기", variable=self.speak),
-            ttk.Checkbutton(row3, text="알아들으면 바로 실행", variable=self.auto_run),
+            ttk.Checkbutton(row4, text="말이 끝나면 자동으로 멈추기", variable=self.auto_stop),
+            ttk.Checkbutton(row4, text=f"알아들으면 {AUTO_RUN_DELAY}초 뒤 자동 실행", variable=self.auto_run),
         ]
         for cb in self.options:
             cb.pack(side="left", padx=(0, 14))
+        self.countdown_job = None
 
         self.status = tk.StringVar(value="목표를 입력하거나 '말하기'를 누르세요.")
-        ttk.Label(frame, textvariable=self.status, font=FONT).grid(row=3, column=0, sticky="w", pady=(10, 4))
+        ttk.Label(frame, textvariable=self.status, font=FONT).grid(row=4, column=0, sticky="w", pady=(10, 4))
         self.hint = tk.StringVar(value="긴급 정지: 마우스를 화면 왼쪽 위 모서리로 빠르게 옮기기")
-        ttk.Label(frame, textvariable=self.hint, foreground="#777").grid(row=4, column=0, sticky="w")
+        ttk.Label(frame, textvariable=self.hint, foreground="#777").grid(row=5, column=0, sticky="w")
 
         self.log = scrolledtext.ScrolledText(frame, height=12, font=("Malgun Gothic", 10), state="disabled")
-        self.log.grid(row=5, column=0, sticky="nsew", pady=(8, 0))
+        self.log.grid(row=6, column=0, sticky="nsew", pady=(8, 0))
 
         sys.stdout = sys.stderr = QueueWriter(self.log_q)
         self.root.after(100, self.drain_log)
@@ -169,6 +182,9 @@ class App:
         if self.running:
             self.stop()
             return
+        if self.countdown_job is not None:
+            self.cancel_countdown("취소했습니다. 고치거나 다시 말하세요.")
+            return
         if not self.mic.recording:
             self.show()  # 무엇을 듣고 있는지 보이게 창을 앞으로
         self.toggle_mic()
@@ -201,14 +217,17 @@ class App:
         if self.running or self.transcribing:
             return
         if not self.mic.recording:
+            self.cancel_countdown()
+            beep("start")
+            auto = self.auto_stop.get()
             try:
-                self.mic.start()
+                self.mic.start(on_event=(lambda ev: self.root.after(0, self._on_endpoint, ev)) if auto else None)
             except Exception as err:
                 self.status.set(f"마이크를 열지 못했습니다: {err}")
                 return
-            beep("start")
             self.mic_btn.configure(text="■ 멈추기")
-            self.status.set("듣고 있습니다... 다 말하면 '멈추기'를 누르세요.")
+            self.status.set("듣고 있습니다... 말을 마치면 자동으로 멈춥니다." if auto else
+                            "듣고 있습니다... 다 말하면 '멈추기'를 누르세요.")
             if not self.stt.loaded:
                 # 말하는 동안 모델을 미리 불러온다 (처음에는 내려받느라 오래 걸림)
                 threading.Thread(target=self._preload, daemon=True).start()
@@ -225,6 +244,41 @@ class App:
         self.status.set("알아듣는 중..." if self.stt.loaded else
                         "알아듣는 중... (처음에는 음성 인식 모델을 내려받아서 몇 분 걸릴 수 있습니다)")
         threading.Thread(target=self._transcribe, args=(audio,), daemon=True).start()
+
+    def _on_endpoint(self, event: str) -> None:
+        """말 끝 감지 결과 (오디오 스레드 → 메인 스레드)."""
+        if not self.mic.recording:
+            return  # 그사이 사용자가 직접 멈췄다
+        if event == NO_SPEECH:
+            self.mic.stop()
+            beep("stop")
+            self.mic_btn.configure(text="🎤 말하기")
+            self.status.set("말소리가 들리지 않아 멈췄습니다. 마이크를 확인하고 다시 말해 주세요.")
+            return
+        if event == MAX:
+            print("녹음이 최대 길이에 닿아 멈췄습니다.")
+        self.toggle_mic()  # 멈추고 알아듣기
+
+    def _on_entry_key(self, event) -> None:
+        # 자동 실행을 기다리는 동안 직접 고치기 시작하면 자동 실행을 멈춘다
+        if self.countdown_job is not None and event.keysym not in ("Return", "Escape"):
+            self.cancel_countdown("자동 실행을 멈췄습니다. 고친 뒤 Enter로 실행하세요.")
+
+    def start_countdown(self, remaining: int) -> None:
+        if remaining <= 0:
+            self.countdown_job = None
+            self.run()
+            return
+        self.status.set(f"{remaining}초 뒤 실행합니다: \"{self.goal.get()}\"  (취소: Esc 또는 단축키)")
+        self.countdown_job = self.root.after(1000, self.start_countdown, remaining - 1)
+
+    def cancel_countdown(self, message: str | None = None) -> None:
+        if self.countdown_job is None:
+            return
+        self.root.after_cancel(self.countdown_job)
+        self.countdown_job = None
+        if message:
+            self.status.set(message)
 
     def _preload(self) -> None:
         try:
@@ -251,7 +305,7 @@ class App:
         self.goal.set(text)
         self.entry.icursor("end")
         if self.auto_run.get():
-            self.run()
+            self.start_countdown(AUTO_RUN_DELAY)
             return
         self.status.set("이렇게 알아들었습니다. 맞으면 '실행'(Enter), 틀리면 고치거나 다시 말하세요.")
 
@@ -264,6 +318,7 @@ class App:
         self.stop_btn.configure(state="normal" if running else "disabled")
 
     def run(self) -> None:
+        self.cancel_countdown()
         goal = self.goal.get().strip()
         if self.running or self.mic.recording:
             return
