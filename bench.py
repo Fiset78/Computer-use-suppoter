@@ -127,6 +127,7 @@ def main() -> int:
         "label": args.label,
         "engine": config.ENGINE,
         "web": config.WEB and config.ENGINE == "sdk",
+        "effort": config.EFFORT if config.ENGINE == "sdk" else None,
         "task_set_version": TASK_SET_VERSION,
         "model": config.MODEL,
         "max_steps": config.MAX_STEPS,

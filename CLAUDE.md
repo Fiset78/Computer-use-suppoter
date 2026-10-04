@@ -9,7 +9,7 @@ Claude로 Windows PC를 조작하는 에이전트 하네스. 리서치/실험용
 - `uv sync` 후 `uv run main.py "목표"`
 - 실행 창(터미널 없이, 음성 입력): `uv run app.py`. 바탕화면 바로가기는 `install_shortcut.ps1` (pythonw로 콘솔 없이 실행)
 - sdk 엔진은 미리 `claude`를 실행해 구독 계정으로 로그인해 둔다. api 엔진은 `ANTHROPIC_API_KEY` 필요
-- 환경 변수: `PC_AGENT_ENGINE` (sdk, api), `PC_AGENT_WEB` (1이면 WebSearch/WebFetch 켜기, sdk 전용), `PC_AGENT_MODEL`, `PC_AGENT_MAX_STEPS`, `PC_AGENT_MAX_LONG_EDGE`, `PC_AGENT_MONITOR`, `PC_AGENT_ASSIST` (보조 도구: uia, wait, all), `PC_AGENT_CONTEXT` (server, prune, none), `PC_AGENT_INPUT` (pyautogui, directinput), `PC_AGENT_WHISPER_MODEL` (음성 인식 모델, 기본 large-v3-turbo), `PC_AGENT_HOTKEY` (실행 창 전역 단축키, 기본 ctrl+alt+space)
+- 환경 변수: `PC_AGENT_ENGINE` (sdk, api), `PC_AGENT_EFFORT` (low, medium, high: 생각 깊이, sdk 전용, 기본 medium), `PC_AGENT_WEB` (1이면 WebSearch/WebFetch 켜기, sdk 전용), `PC_AGENT_MODEL`, `PC_AGENT_MAX_STEPS`, `PC_AGENT_MAX_LONG_EDGE`, `PC_AGENT_MONITOR`, `PC_AGENT_ASSIST` (보조 도구: uia, wait, all), `PC_AGENT_CONTEXT` (server, prune, none), `PC_AGENT_INPUT` (pyautogui, directinput), `PC_AGENT_WHISPER_MODEL` (음성 인식 모델, 기본 large-v3-turbo), `PC_AGENT_HOTKEY` (실행 창 전역 단축키, 기본 ctrl+alt+space)
 - 실행 기록: `runs/<시각>/` (스크린샷 PNG + actions.jsonl)
 - 벤치마크: `uv run bench.py [--tasks a,b] [--repeat N] [--label 이름] [--assist uia,wait] [--context server|prune|none] [--input pyautogui|directinput] [--engine sdk|api] [--web on|off]` → `runs/bench-<시각>/` (results.jsonl, summary.json)
 - 테스트: `uv run pytest` (순수 모듈만)
@@ -21,7 +21,7 @@ Claude로 Windows PC를 조작하는 에이전트 하네스. 리서치/실험용
 - `bench.py`: 벤치마크 진입점. 과제 반복 실행, 자동/수동 판정, 결과 저장
 - `agent/hidden.py`: 실행 창에서 Claude Code CLI를 띄울 때 콘솔 창이 뜨지 않게 `anyio.open_process`에 `CREATE_NO_WINDOW`를 끼워 넣음 (SDK에 옵션이 없어서)
 - `agent/engine.py`: 엔진 선택 (`get_runner`). 엔진별 의존성은 고를 때만 import
-- `agent/sdk_loop.py`: sdk 엔진. MCP 도구 등록, ClaudeSDKClient 실행, ResultMessage → `RunResult`
+- `agent/sdk_loop.py`: sdk 엔진. MCP 도구 등록, ClaudeSDKClient 실행, ResultMessage → `RunResult` (단계별 생각/행동 시간도 잰다: `think_seconds`, `action_seconds`)
 - `agent/batch.py`: sdk 엔진의 `computer` 도구 스키마와 배치 실행 규칙 (순수 모듈)
 - `agent/loop.py`: api 엔진 에이전트 루프, 시스템 프롬프트, 배치 처리. `run()`은 `RunResult`(상태, 단계, 행동, 토큰, 캐시 토큰)를 반환
 - `agent/context.py`: 컨텍스트 관리 (캐시 중단점, 서버 측 clearing 설정, 클라이언트 가지치기). 순수 모듈
@@ -35,7 +35,7 @@ Claude로 Windows PC를 조작하는 에이전트 하네스. 리서치/실험용
 - `perception/elements.py`, `perception/diff.py`: 요소 목록 형식, 화면 변화 판정 (순수 모듈)
 - `actions/keys.py`: xdotool 스타일 키 이름 → pyautogui 키 이름 (순수 함수)
 - `safety/guard.py`: 위험 키/텍스트 입력 전 y/n 확인
-- `logs/recorder.py`: 실행 기록
+- `logs/recorder.py`: 실행 기록. 스크린샷 PNG는 뒤 스레드에서 저장 (close()에서 다 저장될 때까지 기다림)
 
 ## sdk 엔진 규칙
 - 내장 도구는 기본적으로 `tools=[]`로 전부 끈다. `PC_AGENT_WEB=1`일 때만 `WebSearch`, `WebFetch`를 켠다 (Bash/Read 등 파일·셸 도구는 절대 켜지 않음). `allowed_tools`에는 우리 MCP 도구(`mcp__pc__*`)와 켜진 웹 도구만 넣고 `permission_mode="dontAsk"`

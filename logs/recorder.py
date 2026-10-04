@@ -5,6 +5,7 @@ runs/<시각>/ 폴더에 단계별 스크린샷(PNG)과 행동 로그(actions.js
 """
 import json
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from PIL import Image
@@ -17,6 +18,8 @@ class Recorder:
         self.dir.mkdir(parents=True, exist_ok=True)
         self._log = open(self.dir / "actions.jsonl", "a", encoding="utf-8")
         self._img_count = 0
+        # 기록용 PNG 저장(장당 약 0.1초)은 에이전트를 기다리게 하지 않도록 뒤에서 한다
+        self._saver = ThreadPoolExecutor(max_workers=1, thread_name_prefix="recorder")
         self.event("start", goal=goal)
 
     def event(self, kind: str, **data) -> None:
@@ -27,8 +30,9 @@ class Recorder:
     def image(self, img: Image.Image, label: str) -> str:
         self._img_count += 1
         name = f"{self._img_count:04d}_{label}.png"
-        img.save(self.dir / name)
+        self._saver.submit(img.copy().save, self.dir / name)
         return name
 
     def close(self) -> None:
+        self._saver.shutdown(wait=True)  # 남은 스크린샷을 다 저장한 뒤 닫는다
         self._log.close()

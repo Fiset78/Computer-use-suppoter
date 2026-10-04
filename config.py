@@ -10,6 +10,10 @@ ENGINE = os.getenv("PC_AGENT_ENGINE", "sdk").strip().lower()
 # 사용할 모델 (computer_toolset_20260801 지원 모델: Sonnet 5, Opus 5 / 5.5 등)
 MODEL = os.getenv("PC_AGENT_MODEL", "claude-sonnet-5")
 
+# Claude가 단계마다 얼마나 깊이 생각할지: low | medium | high | xhigh | max (sdk 엔진).
+# 낮을수록 빠르지만 어려운 작업은 실수가 늘 수 있다. 비우면 모델 기본값(보통 high).
+EFFORT = os.getenv("PC_AGENT_EFFORT", "medium").strip().lower() or None
+
 # 에이전트 루프 최대 반복 수 (무한 루프·비용 폭주 방지)
 MAX_STEPS = int(os.getenv("PC_AGENT_MAX_STEPS", "30"))
 

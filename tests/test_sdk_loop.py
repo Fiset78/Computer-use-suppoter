@@ -67,3 +67,11 @@ def test_web_tools_on():
     assert tools == ["WebSearch", "WebFetch"]
     assert not {"Bash", "Read", "Write", "Edit"} & set(tools)  # 파일/셸 도구는 절대 켜지 않는다
     assert "WebSearch" in sdk_loop.system_prompt(None, True)
+
+
+def test_action_time_is_recorded():
+    stats = RunResult()
+    tools = sdk_loop._Tools(FakeExecutor(), FakeRecorder(), stats, assist=None)
+    before = tools.ready_at
+    asyncio.run(tools.computer({"actions": [{"action": "key", "text": "a"}]}))
+    assert stats.action_seconds >= 0 and tools.ready_at >= before

@@ -57,6 +57,8 @@ class RunResult:
     cleared_tool_uses: int = 0    # 서버가 지운 도구 결과 수 (server 전략)
     pruned_images: int = 0        # 클라이언트가 지운 스크린샷 수 (prune 전략)
     stop_reason: str | None = None
+    think_seconds: float = 0.0    # Claude가 응답을 만드는 데 걸린 시간 합 (sdk 엔진: 첫 단계는 CLI 시작 포함)
+    action_seconds: float = 0.0   # 우리 쪽에서 행동·스크린샷에 쓴 시간 합
 
     def to_dict(self) -> dict:
         return asdict(self)

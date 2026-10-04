@@ -8,7 +8,8 @@
 success가 None이면 판정하지 않은(건너뛴) 실행으로 보고 성공률 계산에서 뺀다.
 """
 METRIC_KEYS = ("steps", "actions", "action_errors", "input_tokens", "output_tokens",
-               "cache_read_tokens", "cache_write_tokens", "cleared_tool_uses", "pruned_images", "seconds")
+               "cache_read_tokens", "cache_write_tokens", "cleared_tool_uses", "pruned_images", "seconds",
+               "think_seconds", "action_seconds")
 
 
 def _mean(values: list[float]) -> float | None:

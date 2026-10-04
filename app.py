@@ -40,6 +40,8 @@ from voice.hotkey import GlobalHotkey  # noqa: E402
 from voice.stt import MicRecorder, Transcriber  # noqa: E402
 
 FONT = ("Malgun Gothic", 11)
+# 창에서 고르는 생각 깊이 (보이는 이름 → PC_AGENT_EFFORT 값). 빠를수록 어려운 작업에서 실수가 늘 수 있다
+EFFORTS = {"생각: 빠르게": "low", "생각: 보통": "medium", "생각: 깊게": "high"}
 MINIMIZE_WAIT = 0.8  # 창이 내려가는 애니메이션이 끝날 때까지 기다린 뒤 첫 스크린샷을 찍는다
 AUTO_RUN_DELAY = 2   # 알아들은 뒤 자동 실행까지 기다리는 초 (그사이 Esc/단축키로 취소)
 
@@ -141,7 +143,7 @@ class App:
         self.stt = Transcriber()
 
         root.title("pc-agent")
-        root.geometry("640x500")
+        root.geometry("680x520")
         root.minsize(480, 340)
         root.protocol("WM_DELETE_WINDOW", self.on_close)
 
@@ -178,7 +180,11 @@ class App:
         self.auto_run = tk.BooleanVar(value=True)
         row4 = ttk.Frame(frame)
         row4.grid(row=3, column=0, sticky="ew", pady=(4, 0))
+        default_effort = next((k for k, v in EFFORTS.items() if v == config.EFFORT), "생각: 보통")
+        self.effort = tk.StringVar(value=default_effort)
+        effort_menu = ttk.OptionMenu(row3, self.effort, default_effort, *EFFORTS)
         self.options = [
+            effort_menu,
             ttk.Checkbutton(row3, text="웹 검색", variable=self.web),
             ttk.Checkbutton(row3, text="보조 도구", variable=self.assist),
             ttk.Checkbutton(row3, text="결과 읽어 주기", variable=self.speak),
@@ -384,6 +390,7 @@ class App:
             self.status.set("목표가 비어 있습니다.")
             return
         config.WEB = self.web.get()
+        config.EFFORT = EFFORTS[self.effort.get()]
         config.ASSIST = list(config.ASSIST_GROUPS) if self.assist.get() else []
         self.stop_event.clear()
         self.set_running(True)
@@ -404,7 +411,7 @@ class App:
             recorder = Recorder(config.RUNS_DIR, goal)
             executor = Executor(screen, Guard(confirm=True, ask=self.ask), recorder, config.ACTION_DELAY,
                                 backend, stop_check=self.stop_event.is_set)
-            print(f"엔진 {config.ENGINE} · 웹 검색 {'켬' if config.WEB else '끔'} · "
+            print(f"엔진 {config.ENGINE} · 생각 {config.EFFORT} · 웹 검색 {'켬' if config.WEB else '끔'} · "
                   f"보조 도구 {', '.join(config.ASSIST) or '없음'} · 기록 {recorder.dir}")
             try:
                 result = run_agent(goal, executor, recorder)

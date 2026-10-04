@@ -10,6 +10,7 @@ Claude Agent SDK가 Claude Code CLI를 띄우고 에이전트 루프(요청 → 
 - 인증: ANTHROPIC_API_KEY를 CLI에 넘기지 않으므로, 미리 `claude`를 실행해 구독 계정으로 로그인해 둬야 한다.
 """
 import asyncio
+import time
 from typing import Any
 
 from claude_agent_sdk import (
@@ -95,6 +96,14 @@ class _Tools:
         self.assist = assist
         self.abort: BaseException | None = None
         self.lock = asyncio.Lock()  # GUI 동작은 절대 겹쳐 실행하지 않는다
+        self.ready_at = time.monotonic()  # 마지막 도구 결과를 돌려준 시각 (다음 응답까지가 Claude의 생각 시간)
+
+    def _timed(self, started: float) -> None:
+        now = time.monotonic()
+        took = now - started
+        self.stats.action_seconds += took
+        self.ready_at = now
+        print(f"  (행동 {took:.1f}초)")
 
     def build(self) -> list:
         tools = [tool("computer", batch.COMPUTER_TOOL_DESCRIPTION, batch.COMPUTER_TOOL_SCHEMA)(self.computer)]
@@ -112,6 +121,7 @@ class _Tools:
         async with self.lock:
             if (stopped := self._stopped()) is not None:
                 return stopped
+            started = time.monotonic()
             try:
                 # 동기로 실행한다: Guard의 y/n 확인(input)이 메인 스레드에서 돌아야 하므로
                 out = batch.run_batch(args["actions"], self.executor, self.recorder, config.AUTO_SCREENSHOT)
@@ -122,6 +132,7 @@ class _Tools:
                 return self._stopped()
             self.stats.actions += out.executed
             self.stats.action_errors += out.errors
+            self._timed(started)
             return {"content": out.content, "is_error": out.is_error}
 
     def _assist_handler(self, name: str):
@@ -131,6 +142,7 @@ class _Tools:
                     return stopped
                 print(f"  → {name} {args}")
                 self.stats.actions += 1
+                started = time.monotonic()
                 try:
                     result = self.assist.run(name, args)
                 except Exception as err:
@@ -138,10 +150,12 @@ class _Tools:
                         self.abort = err
                         return self._stopped()
                     self.stats.action_errors += 1
+                    self._timed(started)
                     print(f"  ✗ {err}")
                     self.recorder.event("action", name=name, input=args, ok=False, error=str(err))
                     return {"content": [{"type": "text", "text": f"오류: {err}"}], "is_error": True}
                 self.recorder.event("action", name=name, input=args, ok=True)
+                self._timed(started)
                 return {"content": batch.to_mcp_content(result)}
         return handler
 
@@ -163,10 +177,11 @@ async def _run(goal: str, executor: Executor, recorder: Recorder, stats: RunResu
         setting_sources=[],            # 사용자/프로젝트 설정, CLAUDE.md를 읽지 않음 (실험 격리)
         max_turns=config.MAX_STEPS,
         max_buffer_size=MAX_BUFFER_SIZE,
+        effort=config.EFFORT,
         # API 키가 있으면 CLI가 API로 과금하므로 비워서 구독 로그인을 쓰게 한다
         env={"ANTHROPIC_API_KEY": ""},
     )
-    recorder.event("engine", engine="sdk", model=config.MODEL, tools=allowed)
+    recorder.event("engine", engine="sdk", model=config.MODEL, effort=config.EFFORT, tools=allowed)
 
     async def prompt():
         # 지시 텍스트를 이미지보다 먼저 둔다 (API 엔진과 같은 순서)
@@ -190,7 +205,10 @@ async def _run(goal: str, executor: Executor, recorder: Recorder, stats: RunResu
                 if msg.parent_tool_use_id is None and msg.message_id and msg.message_id not in seen:
                     seen.add(msg.message_id)
                     stats.steps = len(seen)
-                    print(f"\n[step {stats.steps}/{config.MAX_STEPS}]")
+                    think = time.monotonic() - handlers.ready_at
+                    stats.think_seconds += think
+                    label = "시작+생각" if stats.steps == 1 else "생각"
+                    print(f"\n[step {stats.steps}/{config.MAX_STEPS}] ({label} {think:.1f}초)")
                     recorder.event("response", step=stats.steps, stop_reason=msg.stop_reason, usage=msg.usage)
                 for block in msg.content:
                     if isinstance(block, TextBlock) and block.text.strip():
@@ -213,6 +231,7 @@ async def _run(goal: str, executor: Executor, recorder: Recorder, stats: RunResu
                     stats.final = "; ".join(msg.errors or []) or (msg.result or "알 수 없는 오류")
                 else:
                     stats.final = (msg.result or "").strip() or "(완료 보고 없음)"
+                print(f"  시간: Claude 생각 {stats.think_seconds:.1f}초 · 행동 {stats.action_seconds:.1f}초")
                 recorder.event("done", step=stats.steps, status=stats.status, final=stats.final,
                                cost_usd=msg.total_cost_usd, usage=msg.usage)
         if handlers.abort is not None:
