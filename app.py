@@ -6,6 +6,8 @@
 - 실행 중에는 창을 최소화한다. 창이 화면을 가리면 Claude가 그 창을 보거나 잘못 클릭할 수 있기 때문이다.
 - 정지 버튼은 다음 행동 직전에 멈춘다. 긴급 정지(마우스를 왼쪽 위 모서리로)도 그대로 동작한다.
 - 위험 행동 확인(y/n)은 대화상자로 묻는다.
+- 전역 단축키(기본 Ctrl+Alt+Space, PC_AGENT_HOTKEY): 어느 창에서든 눌러 말하기 시작/멈추기,
+  실행 중에 누르면 정지.
 """
 import os
 import queue
@@ -31,10 +33,22 @@ from logs.recorder import Recorder  # noqa: E402
 from perception.capture import Screen  # noqa: E402
 from safety.guard import Guard  # noqa: E402
 from voice import tts  # noqa: E402
+from voice.hotkey import GlobalHotkey  # noqa: E402
 from voice.stt import MicRecorder, Transcriber  # noqa: E402
 
 FONT = ("Malgun Gothic", 11)
 MINIMIZE_WAIT = 0.8  # 창이 내려가는 애니메이션이 끝날 때까지 기다린 뒤 첫 스크린샷을 찍는다
+
+
+def beep(kind: str) -> None:
+    """녹음 시작/끝 알림음 (창을 보지 않고 단축키로 쓸 때 필요). Windows가 아니면 무시."""
+    if sys.platform != "win32":
+        return
+    import winsound
+    try:
+        winsound.MessageBeep(winsound.MB_OK if kind == "start" else winsound.MB_ICONASTERISK)
+    except RuntimeError:
+        pass
 
 
 class QueueWriter:
@@ -58,6 +72,7 @@ class App:
         self.log_q: queue.Queue = queue.Queue()
         self.stop_event = threading.Event()
         self.running = False
+        self.transcribing = False
         self.mic = MicRecorder()
         self.stt = Transcriber()
 
@@ -93,24 +108,58 @@ class App:
         self.web = tk.BooleanVar(value=config.WEB)
         self.assist = tk.BooleanVar(value=bool(config.ASSIST))
         self.speak = tk.BooleanVar(value=True)
+        self.auto_run = tk.BooleanVar(value=False)
         self.options = [
             ttk.Checkbutton(row3, text="웹 검색", variable=self.web),
             ttk.Checkbutton(row3, text="보조 도구", variable=self.assist),
             ttk.Checkbutton(row3, text="결과 읽어 주기", variable=self.speak),
+            ttk.Checkbutton(row3, text="알아들으면 바로 실행", variable=self.auto_run),
         ]
         for cb in self.options:
             cb.pack(side="left", padx=(0, 14))
 
         self.status = tk.StringVar(value="목표를 입력하거나 '말하기'를 누르세요.")
         ttk.Label(frame, textvariable=self.status, font=FONT).grid(row=3, column=0, sticky="w", pady=(10, 4))
-        ttk.Label(frame, text="긴급 정지: 마우스를 화면 왼쪽 위 모서리로 빠르게 옮기기",
-                  foreground="#777").grid(row=4, column=0, sticky="w")
+        self.hint = tk.StringVar(value="긴급 정지: 마우스를 화면 왼쪽 위 모서리로 빠르게 옮기기")
+        ttk.Label(frame, textvariable=self.hint, foreground="#777").grid(row=4, column=0, sticky="w")
 
         self.log = scrolledtext.ScrolledText(frame, height=12, font=("Malgun Gothic", 10), state="disabled")
         self.log.grid(row=5, column=0, sticky="nsew", pady=(8, 0))
 
         sys.stdout = sys.stderr = QueueWriter(self.log_q)
         self.root.after(100, self.drain_log)
+        self.entry.focus_set()
+        self.hotkey = self._start_hotkey()
+
+    # ---------- 전역 단축키 ----------
+    def _start_hotkey(self):
+        try:
+            hk = GlobalHotkey(config.HOTKEY, lambda: self.root.after(0, self.on_hotkey))
+        except ValueError as err:
+            print(f"단축키 설정 오류 (PC_AGENT_HOTKEY={config.HOTKEY}): {err}")
+            return None
+        if not hk.start():
+            print(hk.error)
+            return None
+        label = "+".join(p.strip().capitalize() for p in config.HOTKEY.split("+"))
+        self.hint.set(f"단축키 {label}: 말하기/멈추기 · 실행 중에는 정지 · "
+                      "긴급 정지: 마우스를 왼쪽 위 모서리로")
+        return hk
+
+    def on_hotkey(self) -> None:
+        if self.running:
+            self.stop()
+            return
+        if not self.mic.recording:
+            self.show()  # 무엇을 듣고 있는지 보이게 창을 앞으로
+        self.toggle_mic()
+
+    def show(self) -> None:
+        self.root.deiconify()
+        self.root.lift()
+        self.root.attributes("-topmost", True)
+        self.root.after(200, lambda: self.root.attributes("-topmost", False))
+        self.root.focus_force()
         self.entry.focus_set()
 
     # ---------- 기록 칸 ----------
@@ -130,7 +179,7 @@ class App:
 
     # ---------- 음성 입력 ----------
     def toggle_mic(self) -> None:
-        if self.running:
+        if self.running or self.transcribing:
             return
         if not self.mic.recording:
             try:
@@ -138,6 +187,7 @@ class App:
             except Exception as err:
                 self.status.set(f"마이크를 열지 못했습니다: {err}")
                 return
+            beep("start")
             self.mic_btn.configure(text="■ 멈추기")
             self.status.set("듣고 있습니다... 다 말하면 '멈추기'를 누르세요.")
             if not self.stt.loaded:
@@ -147,10 +197,12 @@ class App:
 
         self.mic_btn.configure(text="🎤 말하기")
         audio = self.mic.stop()
+        beep("stop")
         if audio is None:
             self.status.set("녹음이 너무 짧습니다. 다시 말해 주세요.")
             return
         self.mic_btn.configure(state="disabled")
+        self.transcribing = True
         self.status.set("알아듣는 중..." if self.stt.loaded else
                         "알아듣는 중... (처음에는 음성 인식 모델을 내려받아서 몇 분 걸릴 수 있습니다)")
         threading.Thread(target=self._transcribe, args=(audio,), daemon=True).start()
@@ -169,6 +221,7 @@ class App:
         self.root.after(0, self._on_transcribed, text, err)
 
     def _on_transcribed(self, text: str, err) -> None:
+        self.transcribing = False
         self.mic_btn.configure(state="normal")
         if err is not None:
             self.status.set(f"음성 인식 실패: {err}")
@@ -178,7 +231,10 @@ class App:
             return
         self.goal.set(text)
         self.entry.icursor("end")
-        self.status.set("이렇게 알아들었습니다. 맞으면 '실행', 틀리면 고치거나 다시 말하세요.")
+        if self.auto_run.get():
+            self.run()
+            return
+        self.status.set("이렇게 알아들었습니다. 맞으면 '실행'(Enter), 틀리면 고치거나 다시 말하세요.")
 
     # ---------- 실행 ----------
     def set_running(self, running: bool) -> None:
@@ -276,6 +332,8 @@ class App:
         self.stop_event.set()
         if self.mic.recording:
             self.mic.stop()
+        if self.hotkey is not None:
+            self.hotkey.stop()
         self.root.destroy()
 
 

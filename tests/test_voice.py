@@ -59,3 +59,20 @@ def test_whisper_loads_without_pyav(monkeypatch):
     monkeypatch.setitem(sys.modules, "av", None)  # import av → ImportError (차단 흉내)
     WhisperModel = stt.import_whisper_model()
     assert WhisperModel.__name__ == "WhisperModel"
+
+
+def test_parse_hotkey():
+    from voice import hotkey as hk
+
+    mods, vk = hk.parse_hotkey("ctrl+alt+space")
+    assert mods == hk.MOD_CONTROL | hk.MOD_ALT | hk.MOD_NOREPEAT and vk == 0x20
+    assert hk.parse_hotkey("Win+Shift+V") == (hk.MOD_WIN | hk.MOD_SHIFT | hk.MOD_NOREPEAT, ord("V"))
+    assert hk.parse_hotkey("ctrl+f9")[1] == 0x78
+
+
+@pytest.mark.parametrize("bad", ["", "space", "ctrl+", "hyper+a", "ctrl+nokey"])
+def test_parse_hotkey_rejects(bad):
+    from voice.hotkey import parse_hotkey
+
+    with pytest.raises(ValueError):
+        parse_hotkey(bad)
