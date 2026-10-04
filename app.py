@@ -173,7 +173,7 @@ class App:
         row3.grid(row=2, column=0, sticky="ew", pady=(8, 0))
         self.web = tk.BooleanVar(value=config.WEB)
         self.assist = tk.BooleanVar(value=bool(config.ASSIST))
-        self.speak = tk.BooleanVar(value=True)
+        self.speak = tk.BooleanVar(value=False)  # 결과 읽어 주기는 기본 꺼짐
         self.auto_stop = tk.BooleanVar(value=True)
         self.auto_run = tk.BooleanVar(value=True)
         row4 = ttk.Frame(frame)
