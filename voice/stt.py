@@ -5,13 +5,41 @@
 무거운 의존성(sounddevice, faster_whisper)은 실제로 쓸 때만 import한다.
 """
 import os
+import sys
 import threading
+import types
 
 from voice.text import SAMPLE_RATE, clean_transcript, is_too_short
 
 # 모델 크기: tiny < base < small < medium < large-v3. 클수록 정확하지만 느리다.
 # small은 한국어가 쓸 만하고 CPU에서도 짧은 명령은 몇 초 안에 끝난다.
 MODEL_NAME = os.getenv("PC_AGENT_WHISPER_MODEL", "small")
+
+
+BLOCKED_HINT = (
+    "Windows 보안(스마트 앱 컨트롤 등)이 음성 인식 라이브러리 파일을 막았습니다. "
+    "Windows 보안 → 앱 및 브라우저 컨트롤 → 스마트 앱 컨트롤 설정을 확인하세요."
+)
+
+
+def import_whisper_model():
+    """faster_whisper.WhisperModel을 불러온다.
+
+    faster-whisper는 오디오 '파일'을 풀 때만 PyAV(av)를 쓴다. 우리는 녹음한 numpy 배열을 바로 넘기므로
+    av가 없어도 된다. Windows 스마트 앱 컨트롤이 av의 DLL(_core)을 막는 경우가 있어서,
+    av를 불러오지 못하면 빈 모듈로 대신하고 계속 진행한다.
+    """
+    try:
+        import av  # noqa: F401
+    except (ImportError, OSError):
+        for name in [m for m in sys.modules if m == "av" or m.startswith("av.")]:
+            del sys.modules[name]
+        sys.modules["av"] = types.ModuleType("av")
+    try:
+        from faster_whisper import WhisperModel
+    except (ImportError, OSError) as err:
+        raise RuntimeError(f"{BLOCKED_HINT} (원인: {err})") from err
+    return WhisperModel
 
 
 class MicRecorder:
@@ -65,7 +93,7 @@ class Transcriber:
     def load(self) -> None:
         with self._lock:
             if self._model is None:
-                from faster_whisper import WhisperModel
+                WhisperModel = import_whisper_model()
                 self._model = WhisperModel(self.model_name, device="cpu", compute_type="int8")
 
     def transcribe(self, audio) -> str:

@@ -46,3 +46,16 @@ def test_guard_uses_dialog_callback():
     with pytest.raises(PermissionError):
         g.check_key(["alt", "f4"])
     assert asked and "alt+f4" in asked[0]
+
+
+def test_whisper_loads_without_pyav(monkeypatch):
+    """스마트 앱 컨트롤이 PyAV DLL을 막아도 faster-whisper를 불러올 수 있어야 한다."""
+    import sys
+
+    from voice import stt
+
+    for name in [m for m in sys.modules if m == "av" or m.startswith("av.") or m.startswith("faster_whisper")]:
+        monkeypatch.delitem(sys.modules, name)
+    monkeypatch.setitem(sys.modules, "av", None)  # import av → ImportError (차단 흉내)
+    WhisperModel = stt.import_whisper_model()
+    assert WhisperModel.__name__ == "WhisperModel"
