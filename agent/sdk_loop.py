@@ -33,6 +33,10 @@ from logs.recorder import Recorder
 
 SERVER = "pc"
 
+# CLI가 stdout으로 보내는 메시지 한 줄의 최대 크기. 도구 결과에 스크린샷(base64)이 그대로 들어가므로
+# SDK 기본값 1MB로는 PNG 한 장만으로도 넘칠 수 있다 (CLIJSONDecodeError: exceeded maximum buffer size)
+MAX_BUFFER_SIZE = 64 * 1024 * 1024
+
 SDK_PROMPT_NOTE = """
 도구 사용법:
 - 마우스/키보드 조작은 computer 도구 하나로 합니다. 이어서 할 행동은 actions 배열에 한 번에 담으세요.
@@ -139,6 +143,7 @@ async def _run(goal: str, executor: Executor, recorder: Recorder, stats: RunResu
         permission_mode="dontAsk",     # 허용 목록 밖의 도구는 묻지 않고 거부
         setting_sources=[],            # 사용자/프로젝트 설정, CLAUDE.md를 읽지 않음 (실험 격리)
         max_turns=config.MAX_STEPS,
+        max_buffer_size=MAX_BUFFER_SIZE,
         # API 키가 있으면 CLI가 API로 과금하므로 비워서 구독 로그인을 쓰게 한다
         env={"ANTHROPIC_API_KEY": ""},
     )
