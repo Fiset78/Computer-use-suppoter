@@ -52,7 +52,7 @@ powershell -ExecutionPolicy Bypass -File install_shortcut.ps1
 ```
 이후에는 바탕화면의 **pc-agent** 아이콘을 더블클릭합니다 (터미널에서 켜려면 `uv run app.py`).
 - **🎤 말하기** → 말하고 → **■ 멈추기**. 알아들은 문장이 입력칸에 들어가면 확인하고 **실행**을 누릅니다.
-- **단축키 Ctrl+Alt+Space**: 어느 창에서든 한 번 누르고 말하면 끝입니다. 말을 마치고 1.2초 조용하면 자동으로 멈추고,
+- **단축키 Ctrl+Alt+Space**: 어느 창에서든 한 번 누르고 말하면 끝입니다. 말을 마치고 2초 조용하면 자동으로 멈추고,
   알아들은 문장을 2초 보여 준 뒤 자동으로 실행합니다. 그 2초 안에 Esc나 단축키를 누르면 취소됩니다.
   녹음 중에 단축키를 누르면 바로 멈추고, 실행 중에 누르면 정지합니다. 두 자동 기능은 창의 체크 상자로 끌 수 있습니다. Ctrl+Alt+Space를 다른 프로그램이 쓰고 있으면 Ctrl+Alt+F9 → Ctrl+Shift+F9 → Ctrl+Alt+F12 순서로 자동으로 바꾸고, 창 아래쪽에 실제 단축키를 보여 줍니다. 직접 정하려면 `PC_AGENT_HOTKEY` (예: `ctrl+shift+f10`). 실행 창은 하나만 켜집니다.
 - 처음 말할 때 음성 인식 모델 `large-v3-turbo`(약 1.6GB)를 내려받습니다. 인식이 느리면 `PC_AGENT_WHISPER_MODEL`을 `medium`이나 `small`로 낮추세요.

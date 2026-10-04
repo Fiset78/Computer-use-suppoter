@@ -20,7 +20,7 @@ def run(detector, segments):
 
 def test_end_after_speech_then_silence():
     ev, t = run(EndpointDetector(SR), [(0.5, 0.002), (2.0, 0.1), (3.0, 0.002)])
-    assert ev == END and 3.6 <= t <= 3.9  # 말 끝(2.5초) + 1.2초 무렵
+    assert ev == END and 4.4 <= t <= 4.7  # 말 끝(2.5초) + 2초 무렵
 
 
 def test_short_pause_inside_sentence_does_not_end():
@@ -35,7 +35,7 @@ def test_no_speech_times_out():
 
 def test_speaking_immediately_is_still_detected():
     # 측정 구간부터 말해도 기준값이 상한에 걸려 말로 인식된다
-    ev, _ = run(EndpointDetector(SR), [(2.0, 0.1), (2.0, 0.002)])
+    ev, _ = run(EndpointDetector(SR), [(2.0, 0.1), (3.0, 0.002)])
     assert ev == END
 
 

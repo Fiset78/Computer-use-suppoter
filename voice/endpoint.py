@@ -12,7 +12,7 @@ END, NO_SPEECH, MAX = "end", "no_speech", "max"
 
 
 class EndpointDetector:
-    def __init__(self, sample_rate: int, silence_sec: float = 1.2, calib_sec: float = 0.3,
+    def __init__(self, sample_rate: int, silence_sec: float = 2.0, calib_sec: float = 0.3,
                  min_threshold: float = 0.01, max_threshold: float = 0.04, ratio: float = 3.0,
                  no_speech_sec: float = 8.0, max_sec: float = 30.0):
         self.sample_rate = sample_rate
