@@ -30,6 +30,7 @@ import config  # noqa: E402
 from actions import backends  # noqa: E402
 from actions.executor import Executor  # noqa: E402
 from agent.engine import get_runner  # noqa: E402
+from agent.hidden import hide_child_consoles  # noqa: E402
 from logs.recorder import Recorder  # noqa: E402
 from perception.capture import Screen  # noqa: E402
 from safety.guard import Guard  # noqa: E402
@@ -494,6 +495,7 @@ def main() -> None:
         messagebox.showinfo("pc-agent", "실행 창이 이미 켜져 있습니다. 작업 표시줄에서 찾아 주세요.")
         root.destroy()
         return
+    hide_child_consoles()  # 실행할 때 Claude Code의 검은 콘솔 창이 뜨지 않게
     root = tk.Tk()
     App(root)
     root.mainloop()
