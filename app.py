@@ -2,6 +2,7 @@
 
 목표를 입력하거나 말로 하면 에이전트를 실행한다. 바탕화면 바로가기로 켠다 (install_shortcut.ps1).
     uv run app.py              # 터미널에서 켜기 (확인용)
+    uv run app.py --minimized  # 최소화한 채로 켜기 (로그인 때 자동 실행에 쓰임)
 
 - 실행 중에는 창을 최소화하고, 끝나도 다시 띄우지 않는다. 창이 화면을 가리면 Claude가 그 창을 보거나
   잘못 클릭할 수 있기 때문이다. 창이 최소화돼 있으면 상태는 화면 구석 알림으로 보여 준다 (실행 중에는 숨김).
@@ -553,6 +554,9 @@ def main() -> None:
     hide_child_consoles()  # 실행할 때 Claude Code의 검은 콘솔 창이 뜨지 않게
     root = tk.Tk()
     App(root)
+    if "--minimized" in sys.argv[1:]:
+        # Windows 로그인 때 자동 실행: 최소화한 채로 단축키만 기다린다
+        root.iconify()
     root.mainloop()
 
 

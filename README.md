@@ -51,6 +51,8 @@ uv sync
 powershell -ExecutionPolicy Bypass -File install_shortcut.ps1
 ```
 이후에는 바탕화면의 **pc-agent** 아이콘을 더블클릭합니다 (터미널에서 켜려면 `uv run app.py`).
+켜 두는 걸 잊지 않으려면 `install_shortcut.ps1 -Startup`으로 만드세요. Windows에 로그인할 때 최소화된 채로 자동으로 켜져서,
+언제든 단축키만 누르면 됩니다 (끄기: `-RemoveStartup`).
 - **🎤 말하기** → 말하고 → **■ 멈추기**. 알아들은 문장이 입력칸에 들어가면 확인하고 **실행**을 누릅니다.
 - **단축키 Ctrl+Alt+Space**: 어느 창에서든 한 번 누르고 말하면 끝입니다. 말을 마치고 2초 조용하면 자동으로 멈추고,
   알아들은 문장을 2초 보여 준 뒤 자동으로 실행합니다. 그 2초 안에 Esc나 단축키를 누르면 취소됩니다.
