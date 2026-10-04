@@ -45,8 +45,11 @@ def main() -> None:
     executor = Executor(screen, Guard(confirm=True), recorder, config.ACTION_DELAY, backend)
     print(f"기록 폴더: {recorder.dir}")
     context_label = config.CONTEXT if config.ENGINE == "api" else "Claude Code 자동 관리"
+    if config.WEB and config.ENGINE != "sdk":
+        print("주의: 웹 도구(PC_AGENT_WEB)는 sdk 엔진에서만 쓸 수 있어서 무시합니다.")
+    web_label = "켬" if config.WEB and config.ENGINE == "sdk" else "끔"
     print(f"엔진: {config.ENGINE} · 보조 도구: {', '.join(config.ASSIST) or '없음 (순수 computer use)'} · "
-          f"컨텍스트 전략: {context_label} · 입력 백엔드: {backend.name}")
+          f"웹 도구: {web_label} · 컨텍스트 전략: {context_label} · 입력 백엔드: {backend.name}")
     print("긴급 정지: 마우스를 왼쪽 위 모서리로 / Ctrl+C\n")
 
     try:

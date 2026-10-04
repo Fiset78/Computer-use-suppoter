@@ -77,6 +77,8 @@ def main() -> int:
                         help="입력 백엔드: pyautogui, directinput (기본: PC_AGENT_INPUT 환경 변수)")
     parser.add_argument("--engine", default=None,
                         help="엔진: sdk (구독 로그인), api (API 키) (기본: PC_AGENT_ENGINE 환경 변수)")
+    parser.add_argument("--web", choices=["on", "off"], default=None,
+                        help="웹 도구 WebSearch/WebFetch (sdk 엔진 전용, 기본: PC_AGENT_WEB 환경 변수)")
     parser.add_argument("--list", action="store_true", help="과제 목록만 출력")
     parser.add_argument("--no-pause", action="store_true", help="과제 사이에 Enter를 기다리지 않음")
     args = parser.parse_args()
@@ -89,6 +91,8 @@ def main() -> int:
         context.resolve_strategy(config.CONTEXT, config.MODEL)  # 잘못된 값이면 여기서 ValueError
         if args.engine is not None:
             config.ENGINE = args.engine.strip().lower()
+        if args.web is not None:
+            config.WEB = args.web == "on"
         if args.input is not None:
             config.INPUT_BACKEND = args.input.strip().lower()
         if config.INPUT_BACKEND not in backends.BACKENDS:
@@ -122,6 +126,7 @@ def main() -> int:
     meta = {
         "label": args.label,
         "engine": config.ENGINE,
+        "web": config.WEB and config.ENGINE == "sdk",
         "task_set_version": TASK_SET_VERSION,
         "model": config.MODEL,
         "max_steps": config.MAX_STEPS,
@@ -143,7 +148,7 @@ def main() -> int:
     }
     print(f"결과 폴더: {out_dir}")
     print(f"엔진 {config.ENGINE} · 모델 {config.MODEL} · 화면 {screen.width}x{screen.height} → {screen.shot_w}x{screen.shot_h} "
-          f"· 과제 {len(tasks)}개 × {args.repeat}회 · 보조 도구 {','.join(config.ASSIST) or '없음'} · 컨텍스트 {meta['context']} · 입력 {backend.name}")
+          f"· 과제 {len(tasks)}개 × {args.repeat}회 · 보조 도구 {','.join(config.ASSIST) or '없음'} · 웹 {'켬' if meta['web'] else '끔'} · 컨텍스트 {meta['context']} · 입력 {backend.name}")
     print("긴급 정지: 마우스를 왼쪽 위 모서리로 / Ctrl+C\n")
 
     records: list[dict] = []

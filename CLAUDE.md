@@ -8,9 +8,9 @@ Claude로 Windows PC를 조작하는 에이전트 하네스. 리서치/실험용
 ## 실행
 - `uv sync` 후 `uv run main.py "목표"`
 - sdk 엔진은 미리 `claude`를 실행해 구독 계정으로 로그인해 둔다. api 엔진은 `ANTHROPIC_API_KEY` 필요
-- 환경 변수: `PC_AGENT_ENGINE` (sdk, api), `PC_AGENT_MODEL`, `PC_AGENT_MAX_STEPS`, `PC_AGENT_MAX_LONG_EDGE`, `PC_AGENT_MONITOR`, `PC_AGENT_ASSIST` (보조 도구: uia, wait, all), `PC_AGENT_CONTEXT` (server, prune, none), `PC_AGENT_INPUT` (pyautogui, directinput)
+- 환경 변수: `PC_AGENT_ENGINE` (sdk, api), `PC_AGENT_WEB` (1이면 WebSearch/WebFetch 켜기, sdk 전용), `PC_AGENT_MODEL`, `PC_AGENT_MAX_STEPS`, `PC_AGENT_MAX_LONG_EDGE`, `PC_AGENT_MONITOR`, `PC_AGENT_ASSIST` (보조 도구: uia, wait, all), `PC_AGENT_CONTEXT` (server, prune, none), `PC_AGENT_INPUT` (pyautogui, directinput)
 - 실행 기록: `runs/<시각>/` (스크린샷 PNG + actions.jsonl)
-- 벤치마크: `uv run bench.py [--tasks a,b] [--repeat N] [--label 이름] [--assist uia,wait] [--context server|prune|none] [--input pyautogui|directinput] [--engine sdk|api]` → `runs/bench-<시각>/` (results.jsonl, summary.json)
+- 벤치마크: `uv run bench.py [--tasks a,b] [--repeat N] [--label 이름] [--assist uia,wait] [--context server|prune|none] [--input pyautogui|directinput] [--engine sdk|api] [--web on|off]` → `runs/bench-<시각>/` (results.jsonl, summary.json)
 - 테스트: `uv run pytest` (순수 모듈만)
 
 ## 구조
@@ -34,7 +34,7 @@ Claude로 Windows PC를 조작하는 에이전트 하네스. 리서치/실험용
 - `logs/recorder.py`: 실행 기록
 
 ## sdk 엔진 규칙
-- 내장 도구는 `tools=[]`로 전부 끄고, `allowed_tools`에 우리 MCP 도구(`mcp__pc__*`)만 넣고 `permission_mode="dontAsk"`
+- 내장 도구는 기본적으로 `tools=[]`로 전부 끈다. `PC_AGENT_WEB=1`일 때만 `WebSearch`, `WebFetch`를 켠다 (Bash/Read 등 파일·셸 도구는 절대 켜지 않음). 그리고 `allowed_tools`에 우리 MCP 도구(`mcp__pc__*`)만 넣고 `permission_mode="dontAsk"`
 - `setting_sources=[]`로 사용자/프로젝트 설정과 CLAUDE.md를 읽지 않는다 (실험 격리)
 - `env={"ANTHROPIC_API_KEY": ""}`로 API 키를 CLI에 넘기지 않는다 (구독 로그인 사용)
 - `computer` 도구는 첫 실패 이후 행동을 실행하지 않고, 관찰 행동으로 끝나지 않은 배치에 스크린샷을 붙인다 (api 엔진과 같은 규칙)

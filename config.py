@@ -52,6 +52,10 @@ def parse_assist(text: str | None) -> list[str]:
 
 ASSIST = parse_assist(os.getenv("PC_AGENT_ASSIST"))
 
+# Claude Code 내장 웹 도구(WebSearch, WebFetch)를 켤지 여부. sdk 엔진 전용.
+# 켜면 브라우저를 조작하지 않고 텍스트로 검색할 수 있다. 순수 화면 조작 성능을 잴 때는 끈다 (기본 꺼짐).
+WEB = os.getenv("PC_AGENT_WEB", "0").strip().lower() in ("1", "true", "yes", "on")
+
 # 컨텍스트 관리 전략 (로드맵 6단계): server | prune | none
 #   server = 서버 측 tool result clearing (권장, 모든 모델에서 안전)
 #   prune  = 클라이언트 측 스크린샷 가지치기 (Opus 5.5 / Fable 5.1에서는 자동으로 server로 바뀜)

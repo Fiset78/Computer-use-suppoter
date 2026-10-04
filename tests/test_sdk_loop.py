@@ -55,3 +55,15 @@ def test_apply_usage():
     sdk_loop.apply_usage(stats, {"input_tokens": 5, "output_tokens": 7,
                                  "cache_read_input_tokens": 100, "cache_creation_input_tokens": 3})
     assert (stats.input_tokens, stats.output_tokens, stats.cache_read_tokens, stats.cache_write_tokens) == (5, 7, 100, 3)
+
+
+def test_web_tools_off_by_default():
+    assert sdk_loop.builtin_tools(False) == []
+    assert "WebSearch" not in sdk_loop.system_prompt(None, False)
+
+
+def test_web_tools_on():
+    tools = sdk_loop.builtin_tools(True)
+    assert tools == ["WebSearch", "WebFetch"]
+    assert not {"Bash", "Read", "Write", "Edit"} & set(tools)  # 파일/셸 도구는 절대 켜지 않는다
+    assert "WebSearch" in sdk_loop.system_prompt(None, True)
