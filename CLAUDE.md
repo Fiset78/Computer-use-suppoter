@@ -34,7 +34,7 @@ Claude로 Windows PC를 조작하는 에이전트 하네스. 리서치/실험용
 - `logs/recorder.py`: 실행 기록
 
 ## sdk 엔진 규칙
-- 내장 도구는 기본적으로 `tools=[]`로 전부 끈다. `PC_AGENT_WEB=1`일 때만 `WebSearch`, `WebFetch`를 켠다 (Bash/Read 등 파일·셸 도구는 절대 켜지 않음). 그리고 `allowed_tools`에 우리 MCP 도구(`mcp__pc__*`)만 넣고 `permission_mode="dontAsk"`
+- 내장 도구는 기본적으로 `tools=[]`로 전부 끈다. `PC_AGENT_WEB=1`일 때만 `WebSearch`, `WebFetch`를 켠다 (Bash/Read 등 파일·셸 도구는 절대 켜지 않음). `allowed_tools`에는 우리 MCP 도구(`mcp__pc__*`)와 켜진 웹 도구만 넣고 `permission_mode="dontAsk"`
 - `setting_sources=[]`로 사용자/프로젝트 설정과 CLAUDE.md를 읽지 않는다 (실험 격리)
 - `env={"ANTHROPIC_API_KEY": ""}`로 API 키를 CLI에 넘기지 않는다 (구독 로그인 사용)
 - `computer` 도구는 첫 실패 이후 행동을 실행하지 않고, 관찰 행동으로 끝나지 않은 배치에 스크린샷을 붙인다 (api 엔진과 같은 규칙)
