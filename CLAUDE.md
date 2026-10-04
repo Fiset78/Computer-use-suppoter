@@ -20,6 +20,7 @@ Claude로 Windows PC를 조작하는 에이전트 하네스. 리서치/실험용
 - `voice/stt.py`: 마이크 녹음(sounddevice) + 음성 인식(faster-whisper, 로컬). `voice/text.py`: 인식 결과 정리, 단어 힌트(initial_prompt, 기본 단어 + `voice_words.txt`), 음량 맞추기 (순수). `voice/endpoint.py`: 말 끝 감지 (소음 측정 → 말 시작 → 2초 무음이면 종료, 순수). `voice/tts.py`: 결과 읽어 주기 (Windows System.Speech). `voice/hotkey.py`: 전역 단축키 (Win32 RegisterHotKey, ctypes. 새 DLL을 들이지 않으려고 라이브러리를 쓰지 않음)
 - `bench.py`: 벤치마크 진입점. 과제 반복 실행, 자동/수동 판정, 결과 저장
 - `agent/hidden.py`: 실행 창에서 Claude Code CLI를 띄울 때 콘솔 창이 뜨지 않게 `anyio.open_process`에 `CREATE_NO_WINDOW`를 끼워 넣음 (SDK에 옵션이 없어서)
+- `agent/usage.py`: 구독 남은 사용량. sdk 엔진이 받은 `RateLimitEvent`(한도 종류별 사용 비율·초기화 시각)를 `runs/usage.json`에 합쳐 두고 실행 창이 바로 그린다 (순수)
 - `agent/engine.py`: 엔진 선택 (`get_runner`). 엔진별 의존성은 고를 때만 import
 - `agent/sdk_loop.py`: sdk 엔진. MCP 도구 등록, ClaudeSDKClient 실행, ResultMessage → `RunResult` (단계별 생각/행동 시간도 잰다: `think_seconds`, `action_seconds`)
 - `agent/batch.py`: sdk 엔진의 `computer` 도구 스키마와 배치 실행 규칙 (순수 모듈)

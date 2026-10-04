@@ -30,6 +30,7 @@ import config  # noqa: E402
 from actions import backends  # noqa: E402
 from actions.executor import Executor  # noqa: E402
 from agent.engine import get_runner  # noqa: E402
+from agent import sdk_loop, usage  # noqa: E402
 from agent.hidden import hide_child_consoles  # noqa: E402
 from logs.recorder import Recorder  # noqa: E402
 from perception.capture import Screen  # noqa: E402
@@ -143,14 +144,14 @@ class App:
         self.stt = Transcriber()
 
         root.title("pc-agent")
-        root.geometry("680x520")
+        root.geometry("680x600")
         root.minsize(480, 340)
         root.protocol("WM_DELETE_WINDOW", self.on_close)
 
         frame = ttk.Frame(root, padding=12)
         frame.pack(fill="both", expand=True)
         frame.columnconfigure(0, weight=1)
-        frame.rowconfigure(6, weight=1)
+        frame.rowconfigure(7, weight=1)
 
         row = ttk.Frame(frame)
         row.grid(row=0, column=0, sticky="ew")
@@ -201,8 +202,21 @@ class App:
         self.hint = tk.StringVar(value="긴급 정지: 마우스를 화면 왼쪽 위 모서리로 빠르게 옮기기")
         ttk.Label(frame, textvariable=self.hint, foreground="#777").grid(row=5, column=0, sticky="w")
 
-        self.log = scrolledtext.ScrolledText(frame, height=12, font=("Malgun Gothic", 10), state="disabled")
-        self.log.grid(row=6, column=0, sticky="nsew", pady=(8, 0))
+        # 구독 남은 사용량 바 (Claude Code가 실행 중에 알려 준 마지막 값)
+        self.usage_box = ttk.LabelFrame(frame, text="남은 사용량 (구독)", padding=(10, 4))
+        self.usage_box.grid(row=6, column=0, sticky="ew", pady=(8, 0))
+        self.usage_box.columnconfigure(1, weight=1)
+        self.usage_rows: dict[str, tuple] = {}
+        self.usage_empty = ttk.Label(self.usage_box, foreground="#777",
+                                     text="아직 정보 없음 · 한 번 실행하면 Claude Code가 알려 줍니다")
+        self.usage_empty.grid(row=0, column=0, columnspan=3, sticky="w")
+        self.usage_checked = ttk.Label(self.usage_box, foreground="#777")
+        self.usage_store = usage.load(sdk_loop.usage_file())
+        self.show_usage(self.usage_store)
+        sdk_loop.usage_listeners.append(lambda store: self.root.after(0, self.show_usage, store))
+
+        self.log = scrolledtext.ScrolledText(frame, height=10, font=("Malgun Gothic", 10), state="disabled")
+        self.log.grid(row=7, column=0, sticky="nsew", pady=(8, 0))
 
         sys.stdout = sys.stderr = QueueWriter(self.log_q)
         self.root.after(100, self.drain_log)
@@ -258,6 +272,38 @@ class App:
             self.overlay.show(text, seconds)
         else:
             self.overlay.hide()
+
+    # ---------- 남은 사용량 ----------
+    def show_usage(self, store: dict) -> None:
+        self.usage_store = store
+        entries = usage.ordered(store)
+        if not entries:
+            return
+        self.usage_empty.grid_remove()
+        for i, entry in enumerate(entries):
+            kind = entry["type"]
+            if kind not in self.usage_rows:
+                name = ttk.Label(self.usage_box, text=usage.LIMIT_NAMES.get(kind, kind), width=12)
+                bar = ttk.Progressbar(self.usage_box, maximum=100, length=240)
+                text = ttk.Label(self.usage_box)
+                self.usage_rows[kind] = (name, bar, text)
+            name, bar, text = self.usage_rows[kind]
+            name.grid(row=i, column=0, sticky="w")
+            bar.grid(row=i, column=1, sticky="ew", padx=8, pady=2)
+            text.grid(row=i, column=2, sticky="w")
+            rest = usage.remaining(entry)
+            bar.configure(value=0 if rest is None else rest * 100)
+            text.configure(text=usage.describe(entry))
+        checked = max(e.get("checked_at") or 0 for e in entries)
+        if checked:
+            self.usage_checked.configure(text="마지막 확인 " + time.strftime("%m/%d %H:%M", time.localtime(checked)))
+            self.usage_checked.grid(row=len(entries), column=0, columnspan=3, sticky="w")
+        # 초기화 시각이 지나면 글자가 바뀌도록 1분마다 다시 그린다
+        if getattr(self, "_usage_job", None) is None:
+            def tick():
+                self._usage_job = None
+                self.show_usage(self.usage_store)
+            self._usage_job = self.root.after(60_000, tick)
 
     # ---------- 기록 칸 ----------
     def drain_log(self) -> None:
