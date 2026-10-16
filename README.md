@@ -131,6 +131,27 @@ uv run main.py "마인크래프트에서 가장 가까운 나무를 찾아가서
 - 마우스 감도가 기본값(100%)이 아니면 `PC_AGENT_GAME_COUNTS_PER_DEG`를 바꿉니다. 1 count당 회전 = 1.2 × (감도×0.6 + 0.2)³ 도 (감도는 0~1 내부값, 100% 표시 = 0.5) → 기본 6.667 count/도.
 - 보정 확인: `uv run main.py "look 도구로 yaw 360도를 돌린 뒤 처음과 같은 방향인지 확인해줘"`. 방향이 어긋나면 count/도 값을 조정합니다.
 
+### 마인크래프트 인벤토리 칸 찾기 (`minecraft`)
+
+Claude가 스크린샷에서 작은 칸의 좌표를 눈으로 짐작하면 자주 빗나갑니다. `minecraft` 보조 도구를 켜면 하네스가 칸 위치를 직접 계산해 번호를 붙여 줍니다.
+
+```powershell
+$env:PC_AGENT_ASSIST = "game,minecraft"
+```
+
+| 도구 | 설명 |
+|---|---|
+| `find_slots` | 열린 화면(인벤토리, 제작대, 상자, 큰 상자, 화로)과 GUI 배율을 알아내고, 칸마다 번호를 그린 스크린샷과 좌표 목록을 돌려줌 |
+| `click_slot` | 번호로 클릭. `left`, `right`, `shift`(빠른 이동, 제작 결과 전부 꺼내기), `double` |
+| `move_item` | `from_slot`/`to_slot`에 번호를 주면 좌표 대신 번호로 옮김 |
+
+칸 번호: `H1~H9` 핫바, `I1~I27` 인벤(왼쪽 위부터), `C` 제작 칸, `R` 결과, `K` 상자, `A1~A4` 갑옷, `O` 왼손, `F1` 재료·`F2` 연료(화로).
+
+- 칸 배치는 바닐라 마인크래프트 기준입니다. 창 크기와 GUI 배율로 위치를 계산한 뒤, 칸 테두리 색(왼쪽·위 어두운 회색, 오른쪽·아래 흰색)이 맞는지 확인해 화면 종류, GUI 배율, 레시피 책이 열렸는지를 알아냅니다. GUI 크기를 "자동"이 아닌 값으로 바꿔도 찾습니다.
+- 클릭 직전에 화면이 그대로인지 다시 확인하고, 창을 닫는 등 바뀌었으면 클릭하지 않고 `find_slots`를 다시 부르라고 알립니다.
+- 리소스 팩으로 칸 모양이나 색이 바뀌었거나, 크리에이티브 인벤토리처럼 목록에 없는 화면은 찾지 못합니다. 그때는 "찾지 못했습니다"라고 답하고, Claude는 스크린샷 좌표로 조작합니다.
+- 게임 창이 캡처 영역 전체를 채워야 합니다 (`PC_AGENT_WINDOW` 사용 권장).
+
 ### 인벤토리에서 아이템이 제대로 안 옮겨질 때
 
 - 마인크래프트 같은 게임은 누르는 순간 아이템을 집고, 떼어도 내려놓지 않습니다. 그래서 `left_click_drag`로 옮기면 아이템이 커서에 남습니다. `game` 도구를 켜면 Claude에게 드래그 대신 `move_item`이나 Shift+클릭을 쓰라고 안내합니다.
@@ -208,7 +229,7 @@ uv run pytest
 | `PC_AGENT_MAX_STEPS` | `30` | 최대 반복 수 |
 | `PC_AGENT_MAX_LONG_EDGE` | `1280` | 스크린샷 긴 변 최대 픽셀 |
 | `PC_AGENT_MONITOR` | `1` | 캡처할 모니터 (1 = 주 모니터) |
-| `PC_AGENT_ASSIST` | (없음) | 켤 보조 도구: `uia`, `wait`, `game`, `all` |
+| `PC_AGENT_ASSIST` | (없음) | 켤 보조 도구: `uia`, `wait`, `game`, `minecraft`, `all` |
 | `PC_AGENT_CONTEXT` | `server` | 컨텍스트 전략: `server`, `prune`, `none` |
 | `PC_AGENT_INPUT` | `pyautogui` | 입력 백엔드: `pyautogui`, `directinput` |
 | `PC_AGENT_WINDOW` | (없음) | 이 문자열이 제목에 들어간 창만 캡처하고, 입력 전에 활성 창으로 만듦 |

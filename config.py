@@ -31,8 +31,10 @@ RUNS_DIR = os.getenv("PC_AGENT_RUNS_DIR", "runs")
 # 켤 보조 도구 묶음 (로드맵 5단계). 쉼표로 구분: uia, wait, game, all. 비우면 순수 computer use (기준 성능).
 #   uia  = list_ui_elements + click_element (Windows UI Automation)
 #   wait = wait_for_change (화면 변화 감지)
-#   game = look + look_at + hold (1인칭 게임의 시점 회전, 동시·지속 입력. directinput 백엔드와 함께 쓴다)
-ASSIST_GROUPS = ("uia", "wait", "game")
+#   game = look + look_at + hold + move_item (1인칭 게임의 시점 회전, 동시·지속 입력, 아이템 옮기기.
+#          directinput 백엔드와 함께 쓴다)
+#   minecraft = find_slots + click_slot (마인크래프트 인벤토리 칸 위치를 계산해 번호로 알려줌)
+ASSIST_GROUPS = ("uia", "wait", "game", "minecraft")
 
 
 def parse_assist(text: str | None) -> list[str]:

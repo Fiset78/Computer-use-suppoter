@@ -66,7 +66,14 @@ class Screen:
 
     # ---------- 캡처 ----------
     def capture(self) -> Image.Image:
-        img = _to_pil(self._sct.grab(self.monitor))
+        return self.shrink(self.capture_raw())
+
+    def capture_raw(self) -> Image.Image:
+        """축소하지 않은 원본 해상도 캡처 (픽셀 단위 판정용)."""
+        return _to_pil(self._sct.grab(self.monitor))
+
+    def shrink(self, img: Image.Image) -> Image.Image:
+        """원본 캡처를 Claude에게 보낼 스크린샷 크기로 줄인다."""
         if self.scale < 1.0:
             img = img.resize((self.shot_w, self.shot_h), Image.LANCZOS)
         return img

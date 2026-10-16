@@ -5,7 +5,7 @@ Claude API의 computer use(`computer_toolset_20260801`)를 직접 구동하는 W
 
 ## 실행
 - `uv sync` 후 `uv run main.py [--memory 파일] [--ref 파일 ...] [--pick|--no-pick] "목표"` (memory/, refs/에 파일이 있으면 시작 메뉴로 고름)
-- 환경 변수: `ANTHROPIC_API_KEY` (필수), `PC_AGENT_MODEL`, `PC_AGENT_MAX_STEPS`, `PC_AGENT_MAX_LONG_EDGE`, `PC_AGENT_MONITOR`, `PC_AGENT_ASSIST` (보조 도구: uia, wait, game, all), `PC_AGENT_CONTEXT` (server, prune, none), `PC_AGENT_INPUT` (pyautogui, directinput), `PC_AGENT_WINDOW` (이 제목의 창만 캡처/조작), `PC_AGENT_MEMORY` (지식 메모 파일), `PC_AGENT_REFS` (참고 자료, 쉼표 구분), `PC_AGENT_KILL_KEY` (기본 f12), `PC_AGENT_CLICK_SETTLE`/`_HOLD` (게임 클릭 타이밍), `PC_AGENT_GAME_FOV`, `PC_AGENT_GAME_COUNTS_PER_DEG`
+- 환경 변수: `ANTHROPIC_API_KEY` (필수), `PC_AGENT_MODEL`, `PC_AGENT_MAX_STEPS`, `PC_AGENT_MAX_LONG_EDGE`, `PC_AGENT_MONITOR`, `PC_AGENT_ASSIST` (보조 도구: uia, wait, game, minecraft, all), `PC_AGENT_CONTEXT` (server, prune, none), `PC_AGENT_INPUT` (pyautogui, directinput), `PC_AGENT_WINDOW` (이 제목의 창만 캡처/조작), `PC_AGENT_MEMORY` (지식 메모 파일), `PC_AGENT_REFS` (참고 자료, 쉼표 구분), `PC_AGENT_KILL_KEY` (기본 f12), `PC_AGENT_CLICK_SETTLE`/`_HOLD` (게임 클릭 타이밍), `PC_AGENT_GAME_FOV`, `PC_AGENT_GAME_COUNTS_PER_DEG`
 - 실행 기록: `runs/<시각>/` (스크린샷 PNG + actions.jsonl)
 - 벤치마크: `uv run bench.py [--tasks a,b] [--repeat N] [--label 이름] [--assist uia,wait] [--context server|prune|none] [--input pyautogui|directinput]` → `runs/bench-<시각>/` (results.jsonl, summary.json)
 - 테스트: `uv run pytest` (순수 모듈만)
@@ -23,8 +23,9 @@ Claude API의 computer use(`computer_toolset_20260801`)를 직접 구동하는 W
 - `perception/window.py`: 창 찾기(`pick_window`는 순수 함수), 클라이언트 영역, 포커스. `open_screen()`이 main/bench의 Screen을 만든다
 - `actions/executor.py`: 17개 멤버 도구 → 입력 백엔드 호출 (pyautogui를 직접 부르지 않는다)
 - `actions/backends.py`: 교체 가능한 입력 백엔드 (pyautogui / directinput = pydirectinput-rgx). 긴급 정지 판정 `is_failsafe`
-- `actions/assist.py`: 보조 custom 도구 (list_ui_elements, click_element, wait_for_change, look, look_at, hold, move_item) 정의와 실행
+- `actions/assist.py`: 보조 custom 도구 (list_ui_elements, click_element, wait_for_change, look, look_at, hold, move_item, find_slots, click_slot) 정의와 실행
 - `actions/camera.py`: 게임 시점 회전 계산 (스크린샷 좌표 → 각도 → 마우스 상대 이동량). 순수 모듈
+- `perception/mc_slots.py`: 마인크래프트 인벤토리 계열 화면의 칸 배치(바닐라 좌표)와 판정(테두리 색으로 화면 종류·GUI 배율·레시피 책 찾기). 순수 모듈
 - `perception/uia.py`: UIA 트리 탐색 (Windows 전용, uia를 켤 때만 import)
 - `perception/elements.py`, `perception/diff.py`: 요소 목록 형식, 화면 변화 판정 (순수 모듈)
 - `actions/keys.py`: xdotool 스타일 키 이름 → pyautogui 키 이름 (순수 함수)
@@ -62,7 +63,8 @@ Claude API의 computer use(`computer_toolset_20260801`)를 직접 구동하는 W
 9. [ ] 게임 창만 캡처 + 입력 전 포커스 되돌리기 (`PC_AGENT_WINDOW`) (구현 완료, Windows에서 확인 필요)
 10. [ ] 지식 메모: 플레이 사이에 지식 저장/재사용 (`PC_AGENT_MEMORY`) (구현 완료, 메모 유무에 따른 회차별 비교 필요)
 11. [ ] 참고 자료 고르기 + 시작 메뉴 (구현 완료)
-12. [ ] 이후: 게임용 시스템 프롬프트 프로필, 생각하는 동안 일시정지, 게임 상태 도구, 게임 과제 세트
+12. [ ] 마인크래프트 칸 찾기 `minecraft` (find_slots, click_slot, move_item 칸 번호) (구현 완료, 실제 게임에서 확인 필요)
+13. [ ] 이후: 게임용 시스템 프롬프트 프로필, 생각하는 동안 일시정지, 게임 상태 도구, 게임 과제 세트
 
 ## 규칙
 - 마우스/키보드 입력은 반드시 `executor.input`(입력 백엔드)을 통한다. 새 코드에서 pyautogui/pydirectinput를 직접 부르지 않는다
