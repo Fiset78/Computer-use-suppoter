@@ -11,6 +11,7 @@
     uv run bench.py --assist uia,wait     # 보조 도구를 켜고 측정 (기본: 끔 = 순수 computer use)
     uv run bench.py --context prune       # 컨텍스트 관리 전략 (server | prune | none)
     uv run bench.py --input directinput   # 입력 백엔드 (pyautogui | directinput)
+    uv run bench.py --memory memory/desk.md  # 지식 메모를 켜고 측정 (실행마다 메모가 쌓여 다음 실행에 쓰임)
 
 결과: runs/bench-<시각>[-label]/
     results.jsonl   실행마다 한 줄
@@ -36,7 +37,7 @@ import config  # noqa: E402
 from actions import backends  # noqa: E402
 from actions.assist import backend_warning  # noqa: E402
 from actions.executor import Executor  # noqa: E402
-from agent import context, loop  # noqa: E402
+from agent import context, loop, memory  # noqa: E402
 from benchmark.metrics import format_table, summarize  # noqa: E402
 from benchmark.tasks import TASK_SET_VERSION, CheckContext, get_tasks  # noqa: E402
 from logs.recorder import Recorder  # noqa: E402
@@ -78,6 +79,8 @@ def main() -> int:
                         help="컨텍스트 전략: server, prune, none (기본: PC_AGENT_CONTEXT 환경 변수)")
     parser.add_argument("--input", default=None,
                         help="입력 백엔드: pyautogui, directinput (기본: PC_AGENT_INPUT 환경 변수)")
+    parser.add_argument("--memory", default=None,
+                        help="지식 메모 파일 (기본: PC_AGENT_MEMORY 환경 변수, none이면 끔)")
     parser.add_argument("--list", action="store_true", help="과제 목록만 출력")
     parser.add_argument("--no-pause", action="store_true", help="과제 사이에 Enter를 기다리지 않음")
     args = parser.parse_args()
@@ -88,6 +91,8 @@ def main() -> int:
         if args.context is not None:
             config.CONTEXT = args.context.strip().lower()
         context.resolve_strategy(config.CONTEXT, config.MODEL)  # 잘못된 값이면 여기서 ValueError
+        if args.memory is not None:
+            config.MEMORY_FILE = "" if args.memory.strip().lower() in ("", "none") else args.memory.strip()
         if args.input is not None:
             config.INPUT_BACKEND = args.input.strip().lower()
         if config.INPUT_BACKEND not in backends.BACKENDS:
@@ -133,6 +138,8 @@ def main() -> int:
         "prompt_cache": config.PROMPT_CACHE,
         "input_backend": backend.name,
         "window": win.title if win else None,
+        "memory": {"file": config.MEMORY_FILE or None, "reflect": config.MEMORY_REFLECT,
+                   "notes_at_start": len(memory.Memory(config.MEMORY_FILE).notes) if config.MEMORY_FILE else 0},
         "kill_key": config.KILL_KEY,
         "game": {"fov": config.GAME_FOV, "counts_per_deg": config.GAME_COUNTS_PER_DEG},
         "clear": {"trigger": config.CLEAR_TRIGGER, "keep": config.CLEAR_KEEP,

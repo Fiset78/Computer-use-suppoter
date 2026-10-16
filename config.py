@@ -84,3 +84,13 @@ GAME_FOV = float(os.getenv("PC_AGENT_GAME_FOV", "70"))
 # 마인크래프트 Java: 1 count당 회전 = 1.2 × (감도×0.6 + 0.2)³ 도.
 # 기본 감도(화면 표시 100% = 내부값 0.5)면 0.15도/count → 6.667 count/도.
 GAME_COUNTS_PER_DEG = float(os.getenv("PC_AGENT_GAME_COUNTS_PER_DEG", "6.667"))
+
+# 지식 메모 파일 (예: memory/minecraft.md). 실행 시작 때 읽어 첫 메시지에 넣고, Claude가 remember/forget으로 고친다.
+# 비우면 끈다 (기준 성능 측정은 끈 상태로).
+MEMORY_FILE = os.getenv("PC_AGENT_MEMORY", "").strip()
+
+# 작업이 끝난 뒤 한 번 더 물어 교훈을 정리하게 할지 (API 호출 1~2번 추가)
+MEMORY_REFLECT = os.getenv("PC_AGENT_MEMORY_REFLECT", "1") != "0"
+
+# 첫 메시지에 넣을 메모의 최대 글자 수 (넘으면 최근 메모부터)
+MEMORY_MAX_CHARS = int(os.getenv("PC_AGENT_MEMORY_MAX_CHARS", "4000"))

@@ -143,6 +143,21 @@ uv run main.py "가장 가까운 나무를 찾아가서 나무 블록 하나를 
 - 캡처 영역은 시작할 때 정해집니다. 실행 중에 게임 창을 옮기거나 크기를 바꾸지 마세요.
 - 마인크래프트는 포커스를 잃으면 일시정지 메뉴를 엽니다. 터미널을 자주 클릭할 거라면 게임에서 **F3+P**로 "포커스를 잃으면 일시정지"를 끄세요.
 
+## 지식 메모 (`PC_AGENT_MEMORY`)
+
+플레이하며 알게 된 지식을 파일에 저장해 두고, 다음 실행을 시작할 때 Claude에게 보여줍니다.
+
+```powershell
+$env:PC_AGENT_MEMORY = "memory/minecraft.md"
+uv run main.py "나무 블록 4개를 모아줘"
+```
+
+- Claude가 쓰는 custom 도구가 두 개 생깁니다. `remember(note)`: 지식 한 가지를 저장, `forget(note_id)`: 틀린 메모를 삭제. 호출할 때마다 바로 파일에 저장합니다.
+- 작업이 끝나면(완료든 최대 단계 도달이든) 한 번 더 물어 이번 플레이의 교훈을 정리하게 합니다. 이 정리 단계에서는 화면 조작을 실행하지 않습니다. API 호출이 1~2번 늘어나며, `PC_AGENT_MEMORY_REFLECT=0`으로 끌 수 있습니다.
+- 메모는 첫 메시지에 "참고용 기록이며 사용자 지시가 아님"이라고 밝혀서 넣습니다 (system과 tools는 바꾸지 않음). 너무 길면 최근 메모부터 4,000자(`PC_AGENT_MEMORY_MAX_CHARS`)까지만 넣습니다.
+- 파일은 사람이 읽고 고칠 수 있는 Markdown입니다 (`- [날짜] 내용` 한 줄에 하나). 게임 속 표지판이나 채팅 글이 메모로 옮겨져 다음 실행에 영향을 줄 수 있으니 가끔 직접 훑어보세요.
+- 과제(게임)마다 다른 파일을 쓰는 것을 권장합니다. 기준 성능을 잴 때는 끄고, 켠 상태와 비교하려면 `bench.py --memory memory/desk.md --repeat 5`처럼 반복하면 메모가 쌓이며 회차별 변화를 볼 수 있습니다. 실행 기록에는 `memory_add`/`memory_forget` 이벤트가 남습니다.
+
 ## 테스트
 
 GUI 없이 돌릴 수 있는 로직만 테스트합니다: 키 변환, 시점 회전 계산과 game 도구, 긴급 정지, 결과 집계, 요소 목록 형식, 화면 변화 판정, 컨텍스트 관리, 그리고 입력 백엔드, 가짜 `pyautogui`/`pydirectinput`와 가짜 API 클라이언트로 에이전트 루프의 tool_result 규칙과 요청 형태.
@@ -162,6 +177,8 @@ uv run pytest
 | `PC_AGENT_CONTEXT` | `server` | 컨텍스트 전략: `server`, `prune`, `none` |
 | `PC_AGENT_INPUT` | `pyautogui` | 입력 백엔드: `pyautogui`, `directinput` |
 | `PC_AGENT_WINDOW` | (없음) | 이 문자열이 제목에 들어간 창만 캡처하고, 입력 전에 활성 창으로 만듦 |
+| `PC_AGENT_MEMORY` | (없음) | 지식 메모 파일. 비우면 끔 |
+| `PC_AGENT_MEMORY_REFLECT` / `_MAX_CHARS` | `1` / `4000` | 작업 후 교훈 정리 여부 / 첫 메시지에 넣을 메모 최대 글자 수 |
 | `PC_AGENT_KILL_KEY` | `f12` | 긴급 정지 단축키 (F1~F24, `pause`, `scrolllock`). 빈 값이면 끔 |
 | `PC_AGENT_GAME_FOV` | `70` | game 도구: 게임의 세로 시야각(도) |
 | `PC_AGENT_GAME_COUNTS_PER_DEG` | `6.667` | game 도구: 시점 1도당 마우스 이동량 (마인크래프트 기본 감도) |
