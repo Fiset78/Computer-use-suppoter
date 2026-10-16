@@ -48,6 +48,26 @@ SDK_PROMPT_NOTE = """
 - 배치가 screenshot/zoom으로 끝나지 않으면 실행 후 화면이 자동으로 붙으므로 따로 screenshot을 넣지 않아도 됩니다.
 """
 
+HANDOFF_PROMPT_NOTE = """- 도구 결과 맨 앞의 [단계 n/N · 남은 단계 k]로 이번 실행에 남은 단계를 확인하세요.
+  남은 단계가 3 이하인데 목표를 다 끝내지 못했으면, handoff 도구로 지금까지 한 일과 다음에 할 일을 넘기세요.
+  새 실행이 그 내용을 받아 이어서 합니다. handoff를 부른 뒤에는 다른 도구를 부르지 말고 한 줄로 답하고 끝내세요.
+"""
+
+HANDOFF_TOOL_DESCRIPTION = (
+    "이번 실행의 단계가 거의 다 찼을 때 작업을 다음 실행에 넘깁니다. 새 실행은 이전 화면 기록 없이 시작하므로 "
+    "progress에는 끝낸 항목과 확인한 사실(결과, 위치, 화면 상태 등)을, next_goal에는 다음 실행이 바로 할 수 있게 "
+    "구체적인 다음 할 일을 적으세요. 부른 뒤에는 다른 도구를 부르지 말고 끝내세요."
+)
+HANDOFF_TOOL_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "progress": {"type": "string", "description": "지금까지 끝낸 일과 알아낸 사실"},
+        "next_goal": {"type": "string", "description": "다음 실행이 할 일 (구체적으로)"},
+    },
+    "required": ["progress", "next_goal"],
+    "additionalProperties": False,
+}
+
 
 # PC_AGENT_WEB=1일 때 켜는 Claude Code 내장 도구
 WEB_TOOLS = ["WebSearch", "WebFetch"]
@@ -125,8 +145,14 @@ def builtin_tools(web: bool) -> list[str]:
     return list(WEB_TOOLS) if web else []
 
 
-def system_prompt(assist: AssistTools | None, web: bool) -> str:
-    return build_system_prompt(assist) + SDK_PROMPT_NOTE + (WEB_PROMPT_NOTE if web else "")
+def system_prompt(assist: AssistTools | None, web: bool, handoff: bool = False) -> str:
+    return (build_system_prompt(assist) + SDK_PROMPT_NOTE + (HANDOFF_PROMPT_NOTE if handoff else "")
+            + (WEB_PROMPT_NOTE if web else ""))
+
+
+def step_note(step: int, max_steps: int) -> dict:
+    """도구 결과 맨 앞에 붙이는 남은 단계 안내 (Claude가 이어서 하기 시점을 정할 수 있게)."""
+    return {"type": "text", "text": f"[단계 {step}/{max_steps} · 남은 단계 {max(0, max_steps - step)}]"}
 
 
 def tool_name(name: str) -> str:
@@ -155,7 +181,7 @@ class _Tools:
     """MCP 도구 핸들러. 긴급 정지는 결과로 숨기지 않고 abort에 담아 루프가 멈추게 한다."""
 
     def __init__(self, executor: Executor, recorder: Recorder, stats: RunResult,
-                 assist: AssistTools | None):
+                 assist: AssistTools | None, handoff: bool = False):
         self.executor = executor
         self.recorder = recorder
         self.stats = stats
@@ -163,6 +189,11 @@ class _Tools:
         self.abort: BaseException | None = None
         self.lock = asyncio.Lock()  # GUI 동작은 절대 겹쳐 실행하지 않는다
         self.ready_at = time.monotonic()  # 마지막 도구 결과를 돌려준 시각 (다음 응답까지가 Claude의 생각 시간)
+        self.handoff_enabled = handoff
+        self.handoff: dict | None = None   # handoff 도구로 받은 {progress, next_goal}
+
+    def _note(self) -> dict:
+        return step_note(self.stats.steps, config.MAX_STEPS)
 
     def _timed(self, started: float) -> None:
         now = time.monotonic()
@@ -176,7 +207,21 @@ class _Tools:
         for name in (self.assist.names if self.assist else []):
             d = ASSIST_TOOL_DEFS[name]
             tools.append(tool(name, d["description"], d["input_schema"])(self._assist_handler(name)))
+        if self.handoff_enabled:
+            tools.append(tool("handoff", HANDOFF_TOOL_DESCRIPTION, HANDOFF_TOOL_SCHEMA)(self.handoff_tool))
         return tools
+
+    async def handoff_tool(self, args: dict[str, Any]) -> dict:
+        self.handoff = {"progress": args.get("progress", ""), "next_goal": args.get("next_goal", "")}
+        print(f"  → handoff: 다음에 할 일 = {self.handoff['next_goal']}")
+        self.recorder.event("handoff_requested", **self.handoff)
+        return {"content": [{"type": "text", "text": "넘겼습니다. 다른 도구를 부르지 말고 한 줄로 답하고 끝내세요."}]}
+
+    def _after_handoff(self) -> dict | None:
+        if self.handoff is not None:
+            return {"content": [{"type": "text", "text": "이미 다음 실행에 넘겼습니다. 도구를 부르지 말고 끝내세요."}],
+                    "is_error": True}
+        return None
 
     def _stopped(self) -> dict | None:
         if self.abort is not None:
@@ -185,7 +230,7 @@ class _Tools:
 
     async def computer(self, args: dict[str, Any]) -> dict:
         async with self.lock:
-            if (stopped := self._stopped()) is not None:
+            if (stopped := self._stopped() or self._after_handoff()) is not None:
                 return stopped
             started = time.monotonic()
             try:
@@ -199,12 +244,12 @@ class _Tools:
             self.stats.actions += out.executed
             self.stats.action_errors += out.errors
             self._timed(started)
-            return {"content": out.content, "is_error": out.is_error}
+            return {"content": [self._note(), *out.content], "is_error": out.is_error}
 
     def _assist_handler(self, name: str):
         async def handler(args: dict[str, Any]) -> dict:
             async with self.lock:
-                if (stopped := self._stopped()) is not None:
+                if (stopped := self._stopped() or self._after_handoff()) is not None:
                     return stopped
                 print(f"  → {name} {args}")
                 self.stats.actions += 1
@@ -219,23 +264,24 @@ class _Tools:
                     self._timed(started)
                     print(f"  ✗ {err}")
                     self.recorder.event("action", name=name, input=args, ok=False, error=str(err))
-                    return {"content": [{"type": "text", "text": f"오류: {err}"}], "is_error": True}
+                    return {"content": [self._note(), {"type": "text", "text": f"오류: {err}"}], "is_error": True}
                 self.recorder.event("action", name=name, input=args, ok=True)
                 self._timed(started)
-                return {"content": batch.to_mcp_content(result)}
+                return {"content": [self._note(), *batch.to_mcp_content(result)]}
         return handler
 
 
 async def _run(goal: str, executor: Executor, recorder: Recorder, stats: RunResult) -> RunResult:
     assist = AssistTools(executor, config.ASSIST) if config.ASSIST else None
-    handlers = _Tools(executor, recorder, stats, assist)
+    handoff = config.MAX_CHAIN > 1
+    handlers = _Tools(executor, recorder, stats, assist, handoff=handoff)
     tools = handlers.build()
     builtins = builtin_tools(config.WEB)
     allowed = [tool_name(t.name) for t in tools] + builtins
 
     options = ClaudeAgentOptions(
         model=config.MODEL,
-        system_prompt=system_prompt(assist, config.WEB),
+        system_prompt=system_prompt(assist, config.WEB, handoff),
         tools=builtins,                # 내장 도구는 웹 도구(켰을 때)만. Bash, Read, Edit 등은 항상 끔
         mcp_servers={SERVER: create_sdk_mcp_server(SERVER, tools=tools)},
         allowed_tools=allowed,
@@ -294,7 +340,12 @@ async def _run(goal: str, executor: Executor, recorder: Recorder, stats: RunResu
                 stats.steps = msg.num_turns or stats.steps
                 stats.stop_reason = msg.stop_reason
                 stats.status = map_status(msg)
-                if stats.status == "max_steps":
+                if handlers.handoff is not None and stats.status in ("done", "max_steps"):
+                    stats.status = "handoff"
+                    stats.progress = handlers.handoff["progress"]
+                    stats.next_goal = handlers.handoff["next_goal"]
+                    stats.final = f"다음 실행에 넘김: {stats.next_goal}"
+                elif stats.status == "max_steps":
                     stats.final = f"최대 단계 수({config.MAX_STEPS})에 도달해 중단했습니다."
                 elif stats.status == "error":
                     stats.final = "; ".join(msg.errors or []) or (msg.result or "알 수 없는 오류")

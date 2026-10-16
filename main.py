@@ -7,6 +7,7 @@
 긴급 정지: 마우스를 화면 왼쪽 위 모서리로 급히 옮기거나, 터미널에서 Ctrl+C
 """
 import sys
+from pathlib import Path
 
 # DPI 설정은 다른 GUI 모듈(pyautogui, pydirectinput)을 import 하기 전에 해야 한다
 from perception.capture import enable_dpi_awareness
@@ -17,6 +18,7 @@ import config  # noqa: E402
 from actions import backends  # noqa: E402
 from actions.executor import Executor  # noqa: E402
 from agent import context  # noqa: E402
+from agent.chain import run_chain  # noqa: E402
 from agent.engine import get_runner  # noqa: E402
 from logs.recorder import Recorder  # noqa: E402
 from perception.capture import Screen  # noqa: E402
@@ -24,7 +26,16 @@ from safety.guard import Guard  # noqa: E402
 
 
 def main() -> None:
-    goal = " ".join(sys.argv[1:]).strip() or input("목표를 입력하세요: ").strip()
+    args = sys.argv[1:]
+    if len(args) == 2 and args[0] in ("-f", "--file"):
+        # 긴 목표(여러 줄 프롬프트)는 파일로 넘긴다: uv run main.py -f prompts\minecraft_controls.txt
+        try:
+            goal = Path(args[1]).read_text(encoding="utf-8-sig").strip()
+        except OSError as err:
+            print(f"목표 파일을 읽지 못했습니다: {err}")
+            return
+    else:
+        goal = " ".join(args).strip() or input("목표를 입력하세요: ").strip()
     if not goal:
         print("목표가 비어 있습니다.")
         return
@@ -53,7 +64,7 @@ def main() -> None:
     print("긴급 정지: 마우스를 왼쪽 위 모서리로 / Ctrl+C\n")
 
     try:
-        result = run_agent(goal, executor, recorder)
+        result = run_chain(run_agent, goal, executor, recorder, config.MAX_CHAIN)
         print(f"\n=== 결과 ({result.status}) ===\n{result.final}")
         print(f"단계 {result.steps} · 행동 {result.actions} (실패 {result.action_errors}) · "
               f"토큰 입력 {result.input_tokens:,} + 캐시 읽기 {result.cache_read_tokens:,} "

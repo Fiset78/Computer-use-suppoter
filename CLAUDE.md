@@ -6,10 +6,10 @@ Claude로 Windows PC를 조작하는 에이전트 하네스. 리서치/실험용
 최종 목표: 순수 computer use 기준 성능을 먼저 측정한 뒤, 보조 기능(UIA 요소 트리, 화면 변화 감지 등)을 붙여 개선 폭을 비교한다. 이후 마인크래프트 에이전트로 확장할 예정이다.
 
 ## 실행
-- `uv sync` 후 `uv run main.py "목표"`
+- `uv sync` 후 `uv run main.py "목표"` (긴 프롬프트는 `uv run main.py -f prompts\파일.txt`, 실행 창에서는 `@prompts\파일.txt`)
 - 실행 창(터미널 없이, 음성 입력): `uv run app.py`. 바탕화면 바로가기는 `install_shortcut.ps1` (pythonw로 콘솔 없이 실행). `-Startup`이면 로그인 때 `app.py --minimized`로 자동 실행, `-RemoveStartup`으로 해제
 - sdk 엔진은 미리 `claude`를 실행해 구독 계정으로 로그인해 둔다. api 엔진은 `ANTHROPIC_API_KEY` 필요
-- 환경 변수: `PC_AGENT_ENGINE` (sdk, api), `PC_AGENT_EFFORT` (low, medium, high: 생각 깊이, sdk 전용, 기본 medium), `PC_AGENT_WEB` (1이면 WebSearch/WebFetch 켜기, sdk 전용), `PC_AGENT_MODEL`, `PC_AGENT_MAX_STEPS`, `PC_AGENT_MAX_LONG_EDGE`, `PC_AGENT_MONITOR`, `PC_AGENT_ASSIST` (보조 도구: uia, wait, all), `PC_AGENT_CONTEXT` (server, prune, none), `PC_AGENT_INPUT` (pyautogui, directinput), `PC_AGENT_WHISPER_MODEL` (음성 인식 모델, 기본 large-v3-turbo), `PC_AGENT_HOTKEY` (실행 창 전역 단축키, 기본 ctrl+alt+space)
+- 환경 변수: `PC_AGENT_ENGINE` (sdk, api), `PC_AGENT_MAX_CHAIN` (이어서 하기 최대 실행 수, 기본 5, 1이면 끔), `PC_AGENT_EFFORT` (low, medium, high: 생각 깊이, sdk 전용, 기본 medium), `PC_AGENT_WEB` (1이면 WebSearch/WebFetch 켜기, sdk 전용), `PC_AGENT_MODEL`, `PC_AGENT_MAX_STEPS`, `PC_AGENT_MAX_LONG_EDGE`, `PC_AGENT_MONITOR`, `PC_AGENT_ASSIST` (보조 도구: uia, wait, all), `PC_AGENT_CONTEXT` (server, prune, none), `PC_AGENT_INPUT` (pyautogui, directinput), `PC_AGENT_WHISPER_MODEL` (음성 인식 모델, 기본 large-v3-turbo), `PC_AGENT_HOTKEY` (실행 창 전역 단축키, 기본 ctrl+alt+space)
 - 실행 기록: `runs/<시각>/` (스크린샷 PNG + actions.jsonl)
 - 벤치마크: `uv run bench.py [--tasks a,b] [--repeat N] [--label 이름] [--assist uia,wait] [--context server|prune|none] [--input pyautogui|directinput] [--engine sdk|api] [--web on|off]` → `runs/bench-<시각>/` (results.jsonl, summary.json)
 - 테스트: `uv run pytest` (순수 모듈만)
@@ -21,6 +21,8 @@ Claude로 Windows PC를 조작하는 에이전트 하네스. 리서치/실험용
 - `bench.py`: 벤치마크 진입점. 과제 반복 실행, 자동/수동 판정, 결과 저장
 - `agent/hidden.py`: 실행 창에서 Claude Code CLI를 띄울 때 콘솔 창이 뜨지 않게 `anyio.open_process`에 `CREATE_NO_WINDOW`를 끼워 넣음 (SDK에 옵션이 없어서)
 - `agent/usage.py`: 구독 남은 사용량 (순수). 주 출처는 Claude Code의 `get_usage` 제어 요청(`sdk_loop.fetch_usage`, SDK가 감싸지 않은 요청이라 `client._query._send_control_request` 사용, 실패하면 무시). `utilization`은 0~100. 실행 전후·창 시작·10분마다·새로고침 버튼으로 갱신. 보조로 `RateLimitEvent`도 합친다. `runs/usage.json`에 저장
+- `agent/chain.py`: 이어서 하기. 실행 결과가 `handoff`면 `progress`/`next_goal`로 목표를 다시 만들어 새 실행을 이어 붙이고 통계를 합친다 (최대 `MAX_CHAIN`, 벤치마크는 1)
+- `prompts/`: 재사용 프롬프트 (`minecraft_controls.txt`: 마인크래프트 기본 조작 전체 확인)
 - `agent/engine.py`: 엔진 선택 (`get_runner`). 엔진별 의존성은 고를 때만 import
 - `agent/sdk_loop.py`: sdk 엔진. MCP 도구 등록, ClaudeSDKClient 실행, ResultMessage → `RunResult` (단계별 생각/행동 시간도 잰다: `think_seconds`, `action_seconds`)
 - `agent/batch.py`: sdk 엔진의 `computer` 도구 스키마와 배치 실행 규칙 (순수 모듈)
@@ -45,6 +47,8 @@ Claude로 Windows PC를 조작하는 에이전트 하네스. 리서치/실험용
 - `computer` 도구는 첫 실패 이후 행동을 실행하지 않고, 관찰 행동으로 끝나지 않은 배치에 스크린샷을 붙인다 (api 엔진과 같은 규칙)
 - 긴급 정지는 도구 결과로 숨기지 않고 `_Tools.abort`에 담아 루프가 interrupt 후 다시 올린다
 - MCP 이미지 형식은 `{"type": "image", "data", "mimeType"}` (`batch.to_mcp_content`로 변환)
+- 도구 결과 맨 앞에 `[단계 n/N · 남은 단계 k]`를 붙인다. `MAX_CHAIN > 1`이면 `handoff` 도구를 함께 등록해, 단계가 거의 찼을 때 Claude가 다음 실행에 작업을 넘긴다
+- `computer` 도구에는 툴셋 17개 외에 게임용 `look`(delta [dx, dy] 마우스 상대 이동)이 있다. 커서가 고정된 게임의 시점 돌리기용이며 directinput 백엔드에서만 시점이 돈다
 
 ## computer_toolset_20260801 규칙 (api 엔진) (어기면 API가 요청을 거부함)
 - beta 헤더 없음. `client.messages.create`의 `tools=[{"type": "computer_toolset_20260801"}]`

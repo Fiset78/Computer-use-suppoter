@@ -14,6 +14,10 @@ MODEL = os.getenv("PC_AGENT_MODEL", "claude-sonnet-5")
 # 낮을수록 빠르지만 어려운 작업은 실수가 늘 수 있다. 비우면 모델 기본값(보통 high).
 EFFORT = os.getenv("PC_AGENT_EFFORT", "medium").strip().lower() or None
 
+# 이어서 하기: 한 실행(최대 MAX_STEPS 단계) 안에 끝나지 않으면 Claude가 handoff 도구로 다음 실행에 넘긴다.
+# 최대 몇 번의 실행까지 이어 붙일지 (1이면 이어서 하기 끔). sdk 엔진 전용. 벤치마크는 항상 1.
+MAX_CHAIN = int(os.getenv("PC_AGENT_MAX_CHAIN", "5"))
+
 # 에이전트 루프 최대 반복 수 (무한 루프·비용 폭주 방지)
 MAX_STEPS = int(os.getenv("PC_AGENT_MAX_STEPS", "30"))
 

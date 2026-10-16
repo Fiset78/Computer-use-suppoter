@@ -11,12 +11,13 @@ from dataclasses import dataclass, field
 
 from actions import backends
 
-# computer_toolset_20260801의 17개 멤버와 같은 이름 (Executor.do_<이름>으로 실행)
+# computer_toolset_20260801의 17개 멤버와 같은 이름 + 게임용 look (Executor.do_<이름>으로 실행)
 ACTIONS = (
     "screenshot", "zoom", "cursor_position",
     "left_click", "right_click", "middle_click", "double_click", "triple_click",
     "left_click_drag", "mouse_move", "left_mouse_down", "left_mouse_up", "scroll",
     "type", "key", "hold_key", "wait",
+    "look",  # 툴셋에는 없는 추가 행동: 마우스 상대 이동 (커서가 고정된 게임의 시점 돌리기)
 )
 OBSERVE_ACTIONS = {"screenshot", "zoom"}
 MAX_ACTIONS = 20
@@ -42,6 +43,7 @@ COMPUTER_TOOL_SCHEMA = {
                     "duration": {"type": "number", "minimum": 0},
                     "repeat": {"type": "integer", "minimum": 1},
                     "region": {"type": "array", "items": {"type": "integer"}, "minItems": 4, "maxItems": 4},
+                    "delta": {"type": "array", "items": {"type": "integer"}, "minItems": 2, "maxItems": 2},
                 },
                 "required": ["action"],
                 "additionalProperties": False,
@@ -72,6 +74,9 @@ Windows PC의 마우스와 키보드를 조작합니다. actions 배열의 행�
 - key: text에 xdotool 형식 키 조합 ("Return", "ctrl+s", "alt+F4", "super"), repeat (선택)
 - hold_key: text 키를 duration초 동안 누르고 있기
 - wait: duration초 기다리기
+- look: delta [dx, dy]만큼 마우스를 '상대적으로' 움직입니다 (오른쪽·아래가 +). 마우스 커서가 사라지고
+  화면에 고정되는 게임(마인크래프트 등)에서 시점을 돌릴 때 씁니다. mouse_move는 이런 게임에서 시점이 돌지 않습니다.
+  같은 delta라도 게임 감도에 따라 도는 각도가 다르니, 처음에는 작게(예: [200, 0]) 돌려 보고 결과를 보며 맞추세요.
 
 예: {"actions": [{"action": "left_click", "coordinate": [640, 360]}, {"action": "type", "text": "안녕"}, {"action": "key", "text": "Return"}]}"""
 

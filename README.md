@@ -74,6 +74,19 @@ powershell -ExecutionPolicy Bypass -File install_shortcut.ps1
 - 창의 **생각: 빠르게/보통/깊게**로 생각 깊이를 고릅니다 (터미널은 `PC_AGENT_EFFORT=low|medium|high`, 기본 medium). 빠르게일수록 어려운 작업에서 실수가 늘 수 있습니다.
 - 첫 단계는 Claude Code를 켜는 시간이 더해져서 더 깁니다.
 
+## 긴 작업: 이어서 하기
+한 번의 실행은 최대 30단계(`PC_AGENT_MAX_STEPS`)입니다. 끝내지 못할 것 같으면 Claude가 남은 단계를 보고
+`handoff` 도구로 "지금까지 한 일 + 다음에 할 일"을 넘기고, 프로그램이 그 내용으로 새 실행을 자동으로 이어 붙입니다.
+최대 이어 붙이는 횟수는 `PC_AGENT_MAX_CHAIN` (기본 5 → 최대 150단계). 벤치마크에서는 쓰지 않습니다.
+
+## 마인크래프트 조작 테스트
+`prompts/minecraft_controls.txt`는 이동·점프·시점·부수기·놓기·인벤토리·채팅 등 기본 조작을 하나씩 확인하고 표로 보고하는 프롬프트입니다.
+```powershell
+$env:PC_AGENT_INPUT = "directinput"   # 게임 입력 (시점 돌리기 look은 이 백엔드에서만 동작)
+uv run main.py -f prompts\minecraft_controls.txt
+```
+실행 창에서는 입력칸에 `@prompts\minecraft_controls.txt`를 넣고 실행합니다.
+
 ## 긴급 정지
 - 마우스를 **화면 왼쪽 위 모서리**로 급히 옮기면 즉시 멈춥니다.
 - 터미널에서 `Ctrl+C`로도 멈출 수 있습니다.

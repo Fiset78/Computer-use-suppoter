@@ -72,7 +72,25 @@ def test_failsafe_propagates():
         batch.run_batch([{"action": "left_click"}], ex, FakeRecorder())
 
 
-def test_schema_lists_all_17_actions():
-    assert len(batch.ACTIONS) == 17
+def test_schema_lists_all_actions():
+    assert len(batch.ACTIONS) == 18 and "look" in batch.ACTIONS  # 툴셋 17개 + 게임용 look
     enum = batch.COMPUTER_TOOL_SCHEMA["properties"]["actions"]["items"]["properties"]["action"]["enum"]
     assert set(enum) == set(batch.ACTIONS)
+
+
+def test_look_sends_relative_moves_in_small_steps():
+    from actions.executor import Executor
+    from safety.guard import Guard
+
+    class Backend:
+        def __init__(self):
+            self.moves = []
+
+        def move_rel(self, dx, dy):
+            self.moves.append((dx, dy))
+
+    b = Backend()
+    ex = Executor(screen=None, guard=Guard(confirm=False), backend=b, action_delay=0)
+    ex.do_look({"delta": [250, -70]})
+    assert sum(m[0] for m in b.moves) == 250 and sum(m[1] for m in b.moves) == -70
+    assert all(abs(m[0]) <= Executor.LOOK_STEP and abs(m[1]) <= Executor.LOOK_STEP for m in b.moves)

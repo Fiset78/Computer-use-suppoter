@@ -30,6 +30,7 @@ from tkinter import messagebox, scrolledtext, ttk  # noqa: E402
 import config  # noqa: E402
 from actions import backends  # noqa: E402
 from actions.executor import Executor  # noqa: E402
+from agent.chain import run_chain  # noqa: E402
 from agent.engine import get_runner  # noqa: E402
 from agent import sdk_loop, usage  # noqa: E402
 from agent.hidden import hide_child_consoles  # noqa: E402
@@ -458,6 +459,13 @@ class App:
     def run(self) -> None:
         self.cancel_countdown()
         goal = self.goal.get().strip()
+        if goal.startswith("@"):
+            # 긴 프롬프트는 파일로: @prompts\minecraft_controls.txt
+            try:
+                goal = Path(goal[1:].strip()).read_text(encoding="utf-8-sig").strip()
+            except OSError as err:
+                self.notify(f"목표 파일을 읽지 못했습니다: {err}", 6)
+                return
         if self.running or self.mic.recording:
             return
         if not goal:
@@ -488,7 +496,7 @@ class App:
             print(f"엔진 {config.ENGINE} · 생각 {config.EFFORT} · 웹 검색 {'켬' if config.WEB else '끔'} · "
                   f"보조 도구 {', '.join(config.ASSIST) or '없음'} · 기록 {recorder.dir}")
             try:
-                result = run_agent(goal, executor, recorder)
+                result = run_chain(run_agent, goal, executor, recorder, config.MAX_CHAIN)
                 summary = f"완료 ({result.status}) · 단계 {result.steps} · 행동 {result.actions}"
                 spoken = result.final
                 print(f"\n=== 결과 ({result.status}) ===\n{result.final}\n{summary}")

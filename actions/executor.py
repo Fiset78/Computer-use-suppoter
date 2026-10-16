@@ -127,6 +127,21 @@ class Executor:
                 self.input.mouse_up("left")
         return "OK"
 
+    LOOK_STEP = 60   # 한 번에 보내는 상대 이동 크기 (너무 크면 일부 게임이 한 번에 받지 못함)
+    LOOK_LIMIT = 5000
+
+    def do_look(self, inp):
+        """게임 시점 돌리기: 상대 이동을 잘게 나눠 보낸다 (directinput 백엔드에서만 시점이 돈다)."""
+        dx, dy = (max(-self.LOOK_LIMIT, min(self.LOOK_LIMIT, int(v))) for v in inp["delta"])
+        steps = max(1, -(-max(abs(dx), abs(dy)) // self.LOOK_STEP))
+        sent_x = sent_y = 0
+        for i in range(1, steps + 1):
+            tx, ty = round(dx * i / steps), round(dy * i / steps)
+            self.input.move_rel(tx - sent_x, ty - sent_y)
+            sent_x, sent_y = tx, ty
+            time.sleep(0.01)
+        return f"OK (시점 이동 {dx}, {dy})"
+
     def do_mouse_move(self, inp):
         self.input.move_to(*self._point(inp["coordinate"]), duration=0.1)
         return "OK"

@@ -59,6 +59,8 @@ class RunResult:
     stop_reason: str | None = None
     think_seconds: float = 0.0    # Claude가 응답을 만드는 데 걸린 시간 합 (sdk 엔진: 첫 단계는 CLI 시작 포함)
     action_seconds: float = 0.0   # 우리 쪽에서 행동·스크린샷에 쓴 시간 합
+    progress: str = ""            # status == "handoff"일 때: 지금까지 한 일 (다음 실행에 넘김)
+    next_goal: str = ""           # status == "handoff"일 때: 다음 실행이 할 일
 
     def to_dict(self) -> dict:
         return asdict(self)
