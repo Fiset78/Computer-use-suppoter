@@ -73,6 +73,17 @@ PRUNE_BATCH = int(os.getenv("PC_AGENT_PRUNE_BATCH", "10"))
 # 입력 백엔드 (로드맵 7단계): pyautogui (일반 앱, 기본) | directinput (게임, pydirectinput-rgx)
 INPUT_BACKEND = os.getenv("PC_AGENT_INPUT", "pyautogui").strip().lower()
 
+
+def _optional_float(name: str) -> float | None:
+    value = os.getenv(name, "").strip()
+    return float(value) if value else None
+
+
+# 클릭 타이밍(초). 비우면 백엔드 기본값 (pyautogui 0/0, directinput 0.05/0.05).
+# 게임 인벤토리에서 클릭이 씹히면 늘린다.
+CLICK_SETTLE = _optional_float("PC_AGENT_CLICK_SETTLE")  # 커서 이동 후 클릭까지
+CLICK_HOLD = _optional_float("PC_AGENT_CLICK_HOLD")      # 누르고 뗄 때까지
+
 # 긴급 정지 단축키 (F1~F24, pause, scrolllock). 게임은 커서를 붙잡아서 '마우스를 모서리로'가 안 되므로 필요하다.
 # 빈 값이면 끈다.
 KILL_KEY = os.getenv("PC_AGENT_KILL_KEY", "f12").strip().lower()

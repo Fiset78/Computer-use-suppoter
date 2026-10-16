@@ -68,7 +68,8 @@ def main() -> None:
         context.resolve_strategy(config.CONTEXT, config.MODEL)
         if config.KILL_KEY:
             killswitch.vk_code(config.KILL_KEY)  # 잘못된 키면 시작 전에 알린다
-        backend = backends.create(config.INPUT_BACKEND)
+        backend = backends.create(config.INPUT_BACKEND, click_settle=config.CLICK_SETTLE,
+                                  click_hold=config.CLICK_HOLD)
         screen, win = window.open_screen(config.MAX_LONG_EDGE, config.MONITOR_INDEX, config.WINDOW)
     except (ValueError, ImportError, LookupError) as err:
         print(err)

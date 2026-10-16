@@ -115,7 +115,8 @@ def main() -> int:
         return 0
 
     try:
-        backend = backends.create(config.INPUT_BACKEND)
+        backend = backends.create(config.INPUT_BACKEND, click_settle=config.CLICK_SETTLE,
+                                  click_hold=config.CLICK_HOLD)
     except ImportError as err:
         print(f"입력 백엔드 '{config.INPUT_BACKEND}'를 불러오지 못했습니다: {err}")
         return 2

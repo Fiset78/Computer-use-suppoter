@@ -2,7 +2,7 @@
 
 - uia:  list_ui_elements, click_element  — Windows UI Automation 요소 목록과 요소 클릭
 - wait: wait_for_change                  — 화면이 바뀌고 멈출 때까지 기다리기
-- game: look, look_at, hold              — 1인칭 게임의 시점 회전, 여러 키/버튼을 동시에 일정 시간 누르기
+- game: look, look_at, hold, move_item   — 1인칭 게임의 시점 회전, 동시·지속 입력, 인벤토리 아이템 옮기기
 
 custom 도구의 tool_use에는 toolset_name이 없고, tool_result에도 넣지 않는다.
 기준 성능과 비교할 수 있도록 config.ASSIST(환경 변수 PC_AGENT_ASSIST)로 켜고 끈다.
@@ -19,6 +19,14 @@ MAX_LISTED = 150
 MAX_HOLD_SECONDS = 10.0
 HOLD_SLICE = 0.03  # hold 중 시점 회전을 나눠 보내는 간격(초)
 MOUSE_BUTTONS = ("left", "right", "middle")
+ITEM_PAUSE = 0.15  # move_item 클릭 사이 간격(초). 게임이 커서에 든 아이템을 갱신할 시간
+# move_item 방식별 클릭 순서: (출발/도착, 버튼). 마인크래프트식 "클릭해서 집고, 클릭해서 놓기" 인벤토리
+MOVE_MODES = {
+    "all": [("from", "left"), ("to", "left")],                       # 묶음 전부
+    "half": [("from", "right"), ("to", "left")],                     # 절반 집어서 전부 놓기
+    "one": [("from", "left"), ("to", "right"), ("from", "left")],    # 한 개만 놓고 나머지는 되돌리기
+}
+_POINT = {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2}
 
 _ANGLE_PROPS = {
     "yaw": {"type": "number", "description": "수평 회전(도). 양수 = 오른쪽, 음수 = 왼쪽. -180~180."},
@@ -155,19 +163,38 @@ TOOL_DEFS = {
             "additionalProperties": False,
         },
     },
+    "move_item": {
+        "name": "move_item",
+        "description": (
+            "인벤토리, 상자, 제작대처럼 '클릭해서 집고, 클릭해서 놓는' 게임 화면에서 아이템을 한 칸에서 다른 칸으로 "
+            "옮깁니다. 드래그(left_click_drag)는 게임에서 아이템이 커서에 남거나 여러 칸에 나뉘므로 대신 이것을 쓰세요. "
+            "mode: all = 묶음 전부, half = 절반, one = 한 개만 놓고 나머지는 원래 칸으로 되돌림 (제작 칸에 하나씩 놓을 때). "
+            "놓을 칸에 다른 아이템이 있으면 서로 바뀌어 커서에 아이템이 남을 수 있으니 결과 스크린샷을 확인하세요."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "from": {**_POINT, "description": "집을 칸의 [x, y] 스크린샷 좌표"},
+                "to": {**_POINT, "description": "놓을 칸의 [x, y] 스크린샷 좌표"},
+                "mode": {"type": "string", "enum": list(MOVE_MODES), "description": "기본 all"},
+            },
+            "required": ["from", "to"],
+            "additionalProperties": False,
+        },
+    },
 }
 
 GROUP_TOOLS = {
     "uia": ["list_ui_elements", "click_element"],
     "wait": ["wait_for_change"],
-    "game": ["look", "look_at", "hold"],
+    "game": ["look", "look_at", "hold", "move_item"],
 }
 
 # 화면을 바꾸지 않거나 스스로 스크린샷을 돌려주는 도구 (루프가 자동 스크린샷을 붙이지 않음)
 OBSERVE_TOOLS = {"list_ui_elements", "wait_for_change"}
 
 # 입력을 보내는 도구 (실행 전에 대상 창 포커스를 확인)
-INPUT_TOOLS = {"click_element", "look", "look_at", "hold"}
+INPUT_TOOLS = {"click_element", "look", "look_at", "hold", "move_item"}
 
 PROMPT_HINTS = {
     "uia": (
@@ -184,7 +211,10 @@ PROMPT_HINTS = {
         "화면 중앙에서 일어납니다.\n"
         "- 이동, 달리기, 캐기처럼 누르고 있어야 하는 동작은 hold를 쓰세요 (예: keys=[\"w\"], duration=1.5). "
         "게임은 생각하는 동안에도 흘러가므로 한 번에 너무 오래 움직이지 말고 짧게 움직이며 확인하세요.\n"
-        "- 인벤토리, 제작대, 메뉴처럼 커서가 보이는 화면에서는 일반 클릭과 드래그를 쓰세요."
+        "- 인벤토리, 제작대, 메뉴처럼 커서가 보이는 화면에서는 일반 클릭을 쓰세요. 아이템을 옮길 때는 "
+        "left_click_drag를 쓰지 말고 move_item을 쓰세요 (드래그하면 아이템이 커서에 남습니다). "
+        "인벤토리와 상자 사이로 빠르게 옮기거나 제작 결과를 꺼낼 때는 shift를 누른 채 클릭하세요 "
+        "(left_click의 text=\"shift\"). 옮긴 뒤에는 커서에 아이템이 남아 있지 않은지 스크린샷으로 확인하세요."
     ),
 }
 
@@ -365,3 +395,18 @@ class AssistTools:
         held = "+".join(keys + [f"마우스 {b}" for b in buttons])
         turned = f", 수평 {yaw:+.1f}° 수직 {pitch:+.1f}° 회전" if (dx or dy) else ""
         return f"OK: {held} {duration:g}초 누름{turned}"
+
+    def do_move_item(self, inp):
+        mode = inp.get("mode", "all")
+        if mode not in MOVE_MODES:
+            raise ValueError(f"알 수 없는 mode: {mode} (사용 가능: {', '.join(MOVE_MODES)})")
+        points = {"from": self.executor._point(inp["from"]), "to": self.executor._point(inp["to"])}
+        for i, (where, button) in enumerate(MOVE_MODES[mode]):
+            if i:
+                killswitch.sleep(ITEM_PAUSE)
+            self.executor.click_at(points[where], button)
+        killswitch.sleep(self.executor.action_delay)
+        label = {"all": "전부", "half": "절반", "one": "한 개"}[mode]
+        fx, fy = inp["from"]
+        tx, ty = inp["to"]
+        return f"OK: ({fx},{fy}) → ({tx},{ty}) {label} 옮김 (클릭 {len(MOVE_MODES[mode])}번)"

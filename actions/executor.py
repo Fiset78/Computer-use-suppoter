@@ -56,6 +56,28 @@ class Executor:
     def _move_if(self, coord) -> None:
         if coord is not None:
             self.input.move_to(*self._point(coord))
+            killswitch.sleep(self.input.click_settle)
+
+    def press(self, button: str = "left", clicks: int = 1) -> None:
+        """현재 커서 위치에서 클릭. 백엔드에 click_hold가 있으면 누른 채로 잠깐 유지한 뒤 뗀다."""
+        hold = self.input.click_hold
+        if hold <= 0:
+            self.input.click(button=button, clicks=clicks, interval=0.08)
+            return
+        for i in range(clicks):
+            if i:
+                killswitch.sleep(0.06)  # 더블 클릭 간격 안에 들어가도록 짧게
+            self.input.mouse_down(button)
+            try:
+                killswitch.sleep(hold)
+            finally:
+                self.input.mouse_up(button)
+
+    def click_at(self, point: tuple[int, int], button: str = "left") -> None:
+        """실제 화면 좌표로 옮겨서 클릭 (보조 도구용)."""
+        self.input.move_to(*point)
+        killswitch.sleep(self.input.click_settle)
+        self.press(button)
 
     @contextmanager
     def _hold(self, modifiers: list[str]):
@@ -112,7 +134,7 @@ class Executor:
     def _click(self, inp, button="left", clicks=1):
         with self._hold(parse_modifiers(inp.get("text"))):
             self._move_if(inp.get("coordinate"))
-            self.input.click(button=button, clicks=clicks, interval=0.08)
+            self.press(button, clicks)
         return "OK"
 
     def do_left_click(self, inp):

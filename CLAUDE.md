@@ -5,7 +5,7 @@ Claude API의 computer use(`computer_toolset_20260801`)를 직접 구동하는 W
 
 ## 실행
 - `uv sync` 후 `uv run main.py [--memory 파일] [--ref 파일 ...] [--pick|--no-pick] "목표"` (memory/, refs/에 파일이 있으면 시작 메뉴로 고름)
-- 환경 변수: `ANTHROPIC_API_KEY` (필수), `PC_AGENT_MODEL`, `PC_AGENT_MAX_STEPS`, `PC_AGENT_MAX_LONG_EDGE`, `PC_AGENT_MONITOR`, `PC_AGENT_ASSIST` (보조 도구: uia, wait, game, all), `PC_AGENT_CONTEXT` (server, prune, none), `PC_AGENT_INPUT` (pyautogui, directinput), `PC_AGENT_WINDOW` (이 제목의 창만 캡처/조작), `PC_AGENT_MEMORY` (지식 메모 파일), `PC_AGENT_REFS` (참고 자료, 쉼표 구분), `PC_AGENT_KILL_KEY` (기본 f12), `PC_AGENT_GAME_FOV`, `PC_AGENT_GAME_COUNTS_PER_DEG`
+- 환경 변수: `ANTHROPIC_API_KEY` (필수), `PC_AGENT_MODEL`, `PC_AGENT_MAX_STEPS`, `PC_AGENT_MAX_LONG_EDGE`, `PC_AGENT_MONITOR`, `PC_AGENT_ASSIST` (보조 도구: uia, wait, game, all), `PC_AGENT_CONTEXT` (server, prune, none), `PC_AGENT_INPUT` (pyautogui, directinput), `PC_AGENT_WINDOW` (이 제목의 창만 캡처/조작), `PC_AGENT_MEMORY` (지식 메모 파일), `PC_AGENT_REFS` (참고 자료, 쉼표 구분), `PC_AGENT_KILL_KEY` (기본 f12), `PC_AGENT_CLICK_SETTLE`/`_HOLD` (게임 클릭 타이밍), `PC_AGENT_GAME_FOV`, `PC_AGENT_GAME_COUNTS_PER_DEG`
 - 실행 기록: `runs/<시각>/` (스크린샷 PNG + actions.jsonl)
 - 벤치마크: `uv run bench.py [--tasks a,b] [--repeat N] [--label 이름] [--assist uia,wait] [--context server|prune|none] [--input pyautogui|directinput]` → `runs/bench-<시각>/` (results.jsonl, summary.json)
 - 테스트: `uv run pytest` (순수 모듈만)
@@ -23,7 +23,7 @@ Claude API의 computer use(`computer_toolset_20260801`)를 직접 구동하는 W
 - `perception/window.py`: 창 찾기(`pick_window`는 순수 함수), 클라이언트 영역, 포커스. `open_screen()`이 main/bench의 Screen을 만든다
 - `actions/executor.py`: 17개 멤버 도구 → 입력 백엔드 호출 (pyautogui를 직접 부르지 않는다)
 - `actions/backends.py`: 교체 가능한 입력 백엔드 (pyautogui / directinput = pydirectinput-rgx). 긴급 정지 판정 `is_failsafe`
-- `actions/assist.py`: 보조 custom 도구 (list_ui_elements, click_element, wait_for_change, look, look_at, hold) 정의와 실행
+- `actions/assist.py`: 보조 custom 도구 (list_ui_elements, click_element, wait_for_change, look, look_at, hold, move_item) 정의와 실행
 - `actions/camera.py`: 게임 시점 회전 계산 (스크린샷 좌표 → 각도 → 마우스 상대 이동량). 순수 모듈
 - `perception/uia.py`: UIA 트리 탐색 (Windows 전용, uia를 켤 때만 import)
 - `perception/elements.py`, `perception/diff.py`: 요소 목록 형식, 화면 변화 판정 (순수 모듈)
@@ -69,6 +69,7 @@ Claude API의 computer use(`computer_toolset_20260801`)를 직접 구동하는 W
 - 긴급 정지는 `backends.is_failsafe(err)`로 판정한다 (백엔드마다 예외 클래스가 다름). 단축키 정지는 `killswitch.EmergencyStop`
 - 행동 실행 중 기다릴 때는 `time.sleep` 대신 `killswitch.sleep`을 쓴다 (긴급 정지 시 바로 깨어남). 실행이 끝나면 `backend.release_all()`로 눌린 입력을 전부 뗀다
 - 입력을 보내는 새 도구는 실행 전에 `executor.ensure_focus()`를 거친다 (Executor는 `OBSERVE_ONLY` 외 전부, 보조 도구는 `INPUT_TOOLS`)
+- 클릭은 `executor.press()`/`click_at()`을 쓴다 (백엔드의 `click_settle`/`click_hold`를 지킴). 게임 인벤토리 조작은 드래그가 아니라 집기·놓기 클릭이다
 - 이 코드는 Windows에서만 실제로 동작한다. Linux/CI에서는 순수 모듈과, `tests/conftest.py`의 가짜 `pyautogui`로 루프 로직만 테스트한다 (`uv run pytest`).
 - 참고 자료(읽기 전용)와 지식 메모는 첫 user 메시지에만 넣는다. prune은 참고 이미지를 `protect`로 지키지 않으면 지워 버린다
 - 시작 메뉴는 게임 창 포커스 전에 띄운다 (`window.open_screen`보다 먼저)

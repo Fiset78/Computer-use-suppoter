@@ -117,6 +117,7 @@ uv run main.py "마인크래프트에서 앞으로 3초 걸어가줘"
 | `look` | `yaw`(+오른쪽), `pitch`(+위) 각도만큼 시점 회전 |
 | `look_at` | 스크린샷의 `[x, y]` 지점이 화면 중앙(조준점)에 오도록 회전. 시야각으로 픽셀을 각도로 바꿈 |
 | `hold` | `keys`와 `mouse` 버튼을 동시에 `duration`초(최대 10초) 누름. `look`을 주면 그동안 고르게 회전 (예: 달리며 방향 틀기) |
+| `move_item` | 인벤토리·상자·제작대에서 `from` 칸의 아이템을 `to` 칸으로 옮김. 드래그 대신 "클릭해서 집기 → 클릭해서 놓기". `mode`: `all`(전부), `half`(절반), `one`(한 개만 놓고 나머지는 되돌림) |
 
 ```powershell
 $env:PC_AGENT_INPUT = "directinput"   # 게임에서는 필수 (pyautogui로 켜면 경고가 나옴)
@@ -129,6 +130,12 @@ uv run main.py "마인크래프트에서 가장 가까운 나무를 찾아가서
 - 비디오 설정의 **FOV를 `PC_AGENT_GAME_FOV`(기본 70)와 맞추고**, "FOV 효과"는 0%로 끕니다 (달리기·물약으로 FOV가 바뀌면 조준이 어긋남).
 - 마우스 감도가 기본값(100%)이 아니면 `PC_AGENT_GAME_COUNTS_PER_DEG`를 바꿉니다. 1 count당 회전 = 1.2 × (감도×0.6 + 0.2)³ 도 (감도는 0~1 내부값, 100% 표시 = 0.5) → 기본 6.667 count/도.
 - 보정 확인: `uv run main.py "look 도구로 yaw 360도를 돌린 뒤 처음과 같은 방향인지 확인해줘"`. 방향이 어긋나면 count/도 값을 조정합니다.
+
+### 인벤토리에서 아이템이 제대로 안 옮겨질 때
+
+- 마인크래프트 같은 게임은 누르는 순간 아이템을 집고, 떼어도 내려놓지 않습니다. 그래서 `left_click_drag`로 옮기면 아이템이 커서에 남습니다. `game` 도구를 켜면 Claude에게 드래그 대신 `move_item`이나 Shift+클릭을 쓰라고 안내합니다.
+- 게임은 매 프레임 입력을 읽으므로, 커서를 옮기자마자 클릭하거나 누르고 바로 떼면 클릭이 씹히거나 엉뚱한 칸을 누를 수 있습니다. `directinput` 백엔드는 이동 후 0.05초 기다리고, 버튼을 0.05초 누르고 뗍니다. 그래도 씹히면 늘려 보세요: `$env:PC_AGENT_CLICK_SETTLE = "0.1"`, `$env:PC_AGENT_CLICK_HOLD = "0.1"`.
+- 슬롯이 작아 엉뚱한 칸을 누르면 게임의 GUI 크기를 키우세요 (비디오 설정 → GUI 크기).
 
 ### 게임 창만 캡처 (`PC_AGENT_WINDOW`)
 
@@ -210,6 +217,7 @@ uv run pytest
 | `PC_AGENT_REFS` | (없음) | 참고 자료 파일들 (쉼표 구분) |
 | `PC_AGENT_REFS_MAX_CHARS` | `20000` | 참고 자료 텍스트 전체 최대 글자 수 |
 | `PC_AGENT_MEMORY_DIR` / `PC_AGENT_REFS_DIR` | `memory` / `refs` | 시작 메뉴가 보여줄 폴더 |
+| `PC_AGENT_CLICK_SETTLE` / `_HOLD` | 백엔드 기본값 | 커서 이동 후 클릭까지 / 버튼을 누르고 있는 시간(초). directinput 0.05 / 0.05, pyautogui 0 / 0 |
 | `PC_AGENT_KILL_KEY` | `f12` | 긴급 정지 단축키 (F1~F24, `pause`, `scrolllock`). 빈 값이면 끔 |
 | `PC_AGENT_GAME_FOV` | `70` | game 도구: 게임의 세로 시야각(도) |
 | `PC_AGENT_GAME_COUNTS_PER_DEG` | `6.667` | game 도구: 시점 1도당 마우스 이동량 (마인크래프트 기본 감도) |

@@ -161,7 +161,7 @@ def moved(calls):
 
 def test_game_tool_defs():
     assist, _ = make()
-    assert [t["name"] for t in assist.tool_defs()] == ["look", "look_at", "hold"]
+    assert [t["name"] for t in assist.tool_defs()] == ["look", "look_at", "hold", "move_item"]
     assert "look_at" in assist.prompt_hints()
 
 
@@ -237,3 +237,75 @@ def test_backend_warning():
     assert backend_warning(["game"], "pyautogui")
     assert backend_warning(["game"], "directinput") is None
     assert backend_warning(["uia"], "pyautogui") is None
+
+
+# ---------- 인벤토리 클릭 ----------
+class GuiBackend(Backend):
+    click_settle = 0.0
+    click_hold = 0.01
+
+    def move_to(self, x, y, duration=0.0):
+        self.calls.append(("move_to", x, y))
+
+    def click(self, button="left", clicks=1, interval=0.08):
+        self.calls.append(("click", button, clicks))
+
+
+class ScaledScreen(Screen):
+    def to_screen(self, x, y):
+        return x * 2, y * 2
+
+
+def make_gui(hold=0.01):
+    b = GuiBackend()
+    b.click_hold = hold
+    ex = Executor(ScaledScreen(), Guard(), None, action_delay=0, backend=b)
+    return AssistTools(ex, ["game"]), ex, b
+
+
+def test_click_hold_presses_down_and_up_separately():
+    _, ex, b = make_gui()
+    ex.run("double_click", {"coordinate": [10, 20]})
+    assert b.calls == [("move_to", 20, 40), ("mouse_down", "left"), ("mouse_up", "left"),
+                       ("mouse_down", "left"), ("mouse_up", "left")]
+
+
+def test_no_click_hold_keeps_single_click_call():
+    _, ex, b = make_gui(hold=0)
+    ex.run("right_click", {"coordinate": [10, 20]})
+    assert b.calls == [("move_to", 20, 40), ("click", "right", 1)]
+
+
+@pytest.mark.parametrize("mode,expected", [
+    ("all", [((2, 4), "left"), ((20, 40), "left")]),
+    ("half", [((2, 4), "right"), ((20, 40), "left")]),
+    ("one", [((2, 4), "left"), ((20, 40), "right"), ((2, 4), "left")]),
+])
+def test_move_item_clicks_pick_then_place(mode, expected):
+    assist, _, b = make_gui()
+    out = assist.run("move_item", {"from": [1, 2], "to": [10, 20], "mode": mode})
+    got = []
+    pos = None
+    for c in b.calls:
+        if c[0] == "move_to":
+            pos = (c[1], c[2])
+        elif c[0] == "mouse_down":
+            got.append((pos, c[1]))
+    assert got == expected
+    assert not any(c[0] == "move_to" and len(c) > 3 for c in b.calls)  # 드래그(누른 채 이동) 없음
+    assert "(1,2) → (10,20)" in out
+
+
+def test_move_item_validates_before_clicking():
+    assist, _, b = make_gui()
+    with pytest.raises(ValueError):
+        assist.run("move_item", {"from": [1, 2], "to": [5000, 20]})
+    with pytest.raises(ValueError):
+        assist.run("move_item", {"from": [1, 2], "to": [3, 4], "mode": "stack"})
+    assert b.calls == []
+
+
+def test_backend_click_timing_defaults_and_overrides(fake_pdi=None):
+    assert backends.create("pyautogui").click_hold == 0.0
+    b = backends.create("pyautogui", click_settle=0.1, click_hold=-1)
+    assert b.click_settle == 0.1 and b.click_hold == 0.0

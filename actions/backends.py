@@ -29,6 +29,10 @@ def _register_failsafe(exc: type) -> None:
 class InputBackend:
     """입력 백엔드 인터페이스. 좌표는 모두 실제 화면(가상 데스크톱) 픽셀 좌표다."""
     name = "base"
+    # 클릭 타이밍(초). 게임은 매 프레임 입력을 읽으므로, 커서 이동 직후 클릭하거나 누르고 바로 떼면
+    # 놓치거나 엉뚱한 칸을 누를 수 있다. 0이면 기존처럼 click()을 한 번에 보낸다.
+    click_settle = 0.0  # 커서를 옮긴 뒤 클릭까지 기다림
+    click_hold = 0.0    # 버튼을 누르고 뗄 때까지 유지
 
     def position(self) -> tuple[int, int]: raise NotImplementedError
     def move_to(self, x: int, y: int, duration: float = 0.0) -> None: raise NotImplementedError
@@ -143,6 +147,8 @@ class DirectInputBackend(InputBackend):
     """게임용. 스캔 코드 기반이라 DirectX 게임에서도 입력이 들어간다.
     move_rel은 상대 이동 API를 써서 1인칭 게임의 시점 회전(마우스 룩, 게임 보조 도구)에 쓴다."""
     name = "directinput"
+    click_settle = 0.05
+    click_hold = 0.05
 
     def __init__(self, pause: float = 0.05):
         import pydirectinput  # pydirectinput-rgx 패키지 (Windows 전용)
@@ -199,9 +205,17 @@ class DirectInputBackend(InputBackend):
         return self._d.is_valid_key(key)
 
 
-def create(name: str, pause: float = 0.05) -> InputBackend:
+def create(name: str, pause: float = 0.05, click_settle: float | None = None,
+           click_hold: float | None = None) -> InputBackend:
+    """click_settle / click_hold를 주면 백엔드 기본값 대신 쓴다 (PC_AGENT_CLICK_SETTLE / _HOLD)."""
     if name == "pyautogui":
-        return PyAutoGuiBackend(pause)
-    if name == "directinput":
-        return DirectInputBackend(pause)
-    raise ValueError(f"알 수 없는 입력 백엔드: {name} (사용 가능: {', '.join(BACKENDS)})")
+        backend: InputBackend = PyAutoGuiBackend(pause)
+    elif name == "directinput":
+        backend = DirectInputBackend(pause)
+    else:
+        raise ValueError(f"알 수 없는 입력 백엔드: {name} (사용 가능: {', '.join(BACKENDS)})")
+    if click_settle is not None:
+        backend.click_settle = max(0.0, click_settle)
+    if click_hold is not None:
+        backend.click_hold = max(0.0, click_hold)
+    return backend
