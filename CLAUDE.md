@@ -21,6 +21,7 @@ Claude로 Windows PC를 조작하는 에이전트 하네스. 리서치/실험용
 - `bench.py`: 벤치마크 진입점. 과제 반복 실행, 자동/수동 판정, 결과 저장
 - `agent/hidden.py`: 실행 창에서 Claude Code CLI를 띄울 때 콘솔 창이 뜨지 않게 `anyio.open_process`에 `CREATE_NO_WINDOW`를 끼워 넣음 (SDK에 옵션이 없어서)
 - `agent/usage.py`: 구독 남은 사용량 (순수). 주 출처는 Claude Code의 `get_usage` 제어 요청(`sdk_loop.fetch_usage`, SDK가 감싸지 않은 요청이라 `client._query._send_control_request` 사용, 실패하면 무시). `utilization`은 0~100. 실행 전후·창 시작·10분마다·새로고침 버튼으로 갱신. 보조로 `RateLimitEvent`도 합친다. `runs/usage.json`에 저장
+- `agent/inbox.py`: 실행 중 추가 지시함 (순수). 실행 창이 실행 도중 받은 말·입력을 넣고, sdk 엔진이 다음 도구 결과 끝에 `MARKER` 블록으로 붙여 전달한다. 실행이 끝날 때 남은 지시는 실행 창이 `follow_up_goal`로 이어서 실행. "멈춰/정지/그만"만 말하면 정지 (`is_stop_command`)
 - `agent/chain.py`: 이어서 하기. 실행 결과가 `handoff`면 `progress`/`next_goal`로 목표를 다시 만들어 새 실행을 이어 붙이고 통계를 합친다 (최대 `MAX_CHAIN`, 벤치마크는 1)
 - `prompts/`: 재사용 프롬프트 (`minecraft_controls.txt`: 마인크래프트 기본 조작 전체 확인)
 - `agent/engine.py`: 엔진 선택 (`get_runner`). 엔진별 의존성은 고를 때만 import

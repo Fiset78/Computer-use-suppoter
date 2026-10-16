@@ -8,8 +8,9 @@
   잘못 클릭할 수 있기 때문이다. 창이 최소화돼 있으면 상태는 화면 구석 알림으로 보여 준다 (실행 중에는 숨김).
 - 정지 버튼은 다음 행동 직전에 멈춘다. 긴급 정지(마우스를 왼쪽 위 모서리로)도 그대로 동작한다.
 - 위험 행동 확인(y/n)은 대화상자로 묻는다.
-- 전역 단축키(기본 Ctrl+Alt+Space, PC_AGENT_HOTKEY): 어느 창에서든 눌러 말하기 시작/멈추기,
-  실행 중에 누르면 정지.
+- 전역 단축키(기본 Ctrl+Alt+Space, PC_AGENT_HOTKEY): 어느 창에서든 눌러 말하기 시작/멈추기.
+  실행 중에 말하거나 입력칸에 쓰면 진행 중인 작업에 추가 지시로 전달된다 (agent/inbox.py).
+  실행 중 정지: "멈춰/정지/그만"이라고 말하기, 정지 버튼, 마우스를 왼쪽 위 모서리로.
 """
 import os
 import queue
@@ -31,6 +32,7 @@ import config  # noqa: E402
 from actions import backends  # noqa: E402
 from actions.executor import Executor  # noqa: E402
 from agent.chain import run_chain  # noqa: E402
+from agent.inbox import follow_up_goal, inbox, is_stop_command  # noqa: E402
 from agent.engine import get_runner  # noqa: E402
 from agent import sdk_loop, usage  # noqa: E402
 from agent.hidden import hide_child_consoles  # noqa: E402
@@ -246,7 +248,7 @@ class App:
                 if failed:
                     print(f"{', '.join(map(hotkey_label, failed))}는 다른 프로그램이 쓰고 있어서 "
                           f"{label}로 등록했습니다.")
-                self.hint.set(f"단축키 {label}: 말하기/멈추기 · 실행 중에는 정지 · "
+                self.hint.set(f"단축키 {label}: 말하기 (실행 중엔 추가 지시, \"멈춰\"는 정지) · "
                               "긴급 정지: 마우스를 왼쪽 위 모서리로")
                 return hk
             if sys.platform != "win32":
@@ -261,9 +263,8 @@ class App:
         return None
 
     def on_hotkey(self) -> None:
-        if self.running:
-            self.stop()
-            return
+        # 실행 중에도 단축키는 '말하기'다. 말한 내용은 진행 중인 작업에 추가 지시로 전달된다
+        # (정지는 "멈춰/정지/그만"이라고 말하거나, 정지 버튼, 마우스를 왼쪽 위 모서리로)
         if self.countdown_job is not None:
             self.cancel_countdown("취소했습니다. 고치거나 다시 말하세요.")
             return
@@ -351,7 +352,7 @@ class App:
 
     # ---------- 음성 입력 ----------
     def toggle_mic(self) -> None:
-        if self.running or self.transcribing:
+        if self.transcribing:
             return
         if not self.mic.recording:
             self.cancel_countdown()
@@ -441,6 +442,13 @@ class App:
             self.notify("알아듣지 못했습니다. 다시 말해 주세요.", 4)
             return
         print(f"🎤 알아들은 말: {text}")
+        if self.running:
+            if is_stop_command(text):
+                print("  → 정지 명령으로 알아들었습니다.")
+                self.stop()
+            else:
+                self.send_instruction(text)
+            return
         self.goal.set(text)
         self.entry.icursor("end")
         if self.auto_run.get():
@@ -451,14 +459,30 @@ class App:
     # ---------- 실행 ----------
     def set_running(self, running: bool) -> None:
         self.running = running
-        state = "disabled" if running else "normal"
-        for w in (self.run_btn, self.mic_btn, self.entry, *self.options):
-            w.configure(state=state)
+        # 입력칸·말하기·실행 버튼은 실행 중에도 쓴다 (추가 지시 보내기). 옵션만 잠근다
+        for w in self.options:
+            w.configure(state="disabled" if running else "normal")
+        self.run_btn.configure(text="지시 보내기" if running else "실행")
         self.stop_btn.configure(state="normal" if running else "disabled")
+
+    def send_instruction(self, text: str) -> None:
+        """실행 중에 받은 지시를 추가 지시함에 넣는다. 엔진이 다음 도구 결과에 붙여 Claude에게 전달한다."""
+        inbox.put(text)
+        print(f"📨 추가 지시 접수 (다음 행동 결과와 함께 전달): {text}")
+        self.status.set(f"추가 지시 접수: {text}")
+        beep("start")
 
     def run(self) -> None:
         self.cancel_countdown()
         goal = self.goal.get().strip()
+        if self.running:
+            if goal:
+                self.goal.set("")
+                if is_stop_command(goal):
+                    self.stop()
+                else:
+                    self.send_instruction(goal)
+            return
         if goal.startswith("@"):
             # 긴 프롬프트는 파일로: @prompts\minecraft_controls.txt
             try:
@@ -466,7 +490,7 @@ class App:
             except OSError as err:
                 self.notify(f"목표 파일을 읽지 못했습니다: {err}", 6)
                 return
-        if self.running or self.mic.recording:
+        if self.mic.recording:
             return
         if not goal:
             self.status.set("목표가 비어 있습니다.")
@@ -496,10 +520,19 @@ class App:
             print(f"엔진 {config.ENGINE} · 생각 {config.EFFORT} · 웹 검색 {'켬' if config.WEB else '끔'} · "
                   f"보조 도구 {', '.join(config.ASSIST) or '없음'} · 기록 {recorder.dir}")
             try:
-                result = run_chain(run_agent, goal, executor, recorder, config.MAX_CHAIN)
-                summary = f"완료 ({result.status}) · 단계 {result.steps} · 행동 {result.actions}"
-                spoken = result.final
-                print(f"\n=== 결과 ({result.status}) ===\n{result.final}\n{summary}")
+                current = goal
+                while True:
+                    result = run_chain(run_agent, current, executor, recorder, config.MAX_CHAIN)
+                    summary = f"완료 ({result.status}) · 단계 {result.steps} · 행동 {result.actions}"
+                    spoken = result.final
+                    print(f"\n=== 결과 ({result.status}) ===\n{result.final}\n{summary}")
+                    # 실행이 끝날 무렵 들어와 전달되지 못한 지시가 있으면 그것으로 이어서 실행한다
+                    pending = inbox.drain()
+                    if not pending or self.stop_event.is_set():
+                        break
+                    print(f"\n===== 남은 추가 지시로 이어서 실행: {' / '.join(pending)} =====")
+                    recorder.event("follow_up", messages=pending)
+                    current = follow_up_goal(current, result.final, pending)
             except Exception as err:
                 if not backends.is_failsafe(err):
                     raise
@@ -513,6 +546,7 @@ class App:
         finally:
             if recorder is not None:
                 recorder.close()
+            inbox.drain()  # 정지·오류로 끝났으면 전달 못 한 지시는 버린다 (다음 실행에 섞이지 않게)
         self.root.after(0, self._finish, summary, spoken)
 
     def _finish(self, summary: str, spoken: str) -> None:
