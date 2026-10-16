@@ -28,9 +28,18 @@ def _to_pil(raw) -> Image.Image:
 
 
 class Screen:
-    def __init__(self, max_long_edge: int = 1280, monitor_index: int = 1):
+    def __init__(self, max_long_edge: int = 1280, monitor_index: int = 1,
+                 region: tuple[int, int, int, int] | None = None):
+        """region = (left, top, width, height)을 주면 모니터 대신 그 영역만 캡처한다 (예: 게임 창).
+        스크린샷 좌표의 (0,0)은 그 영역의 왼쪽 위가 된다."""
         self._sct = mss.mss()
-        self.monitor = self._sct.monitors[monitor_index]
+        if region is not None:
+            left, top, width, height = region
+            if width <= 0 or height <= 0:
+                raise ValueError(f"잘못된 캡처 영역: {region}")
+            self.monitor = {"left": left, "top": top, "width": width, "height": height}
+        else:
+            self.monitor = self._sct.monitors[monitor_index]
         self.left = self.monitor["left"]
         self.top = self.monitor["top"]
         self.width = self.monitor["width"]

@@ -14,6 +14,10 @@ MAX_LONG_EDGE = int(os.getenv("PC_AGENT_MAX_LONG_EDGE", "1280"))
 # 캡처할 모니터 번호 (mss 기준: 1 = 주 모니터)
 MONITOR_INDEX = int(os.getenv("PC_AGENT_MONITOR", "1"))
 
+# 이 문자열이 제목에 들어간 창(예: "Minecraft")만 캡처하고, 행동 전에 그 창을 활성 창으로 만든다.
+# 게임 창 옆에 프로그램(터미널) 창을 함께 띄워 둘 때 쓴다. 비우면 모니터 전체를 캡처한다.
+WINDOW = os.getenv("PC_AGENT_WINDOW", "").strip()
+
 # 각 행동 후 UI가 반응할 때까지 기다리는 시간(초)
 ACTION_DELAY = float(os.getenv("PC_AGENT_ACTION_DELAY", "0.4"))
 

@@ -12,9 +12,14 @@ import pyperclip
 
 from actions.backends import InputBackend, PyAutoGuiBackend
 from actions.keys import parse_combo, parse_modifiers
+from perception import window
 from perception.capture import Screen, to_image_block
 from safety import killswitch
 from safety.guard import Guard
+
+
+# 입력을 보내지 않는 도구 (포커스 확인과 행동 후 대기를 건너뜀)
+OBSERVE_ONLY = ("screenshot", "zoom", "cursor_position", "wait")
 
 
 class Executor:
@@ -26,6 +31,18 @@ class Executor:
         self.recorder = recorder
         self.action_delay = action_delay
         self.last_shot = None  # Claude에게 마지막으로 보낸 전체 스크린샷 (wait_for_change의 기준)
+        self.focus_hwnd: int | None = None  # 설정하면 입력 전에 이 창을 활성 창으로 만든다 (PC_AGENT_WINDOW)
+
+    def ensure_focus(self) -> None:
+        """대상 창이 활성 창이 아니면 되돌린다. 입력은 활성 창으로 가므로, 사용자가 터미널을 클릭해 두면
+        키 입력이 터미널에 들어가 버린다."""
+        if self.focus_hwnd is None or window.foreground() == self.focus_hwnd:
+            return
+        ok = window.focus(self.focus_hwnd)
+        if self.recorder:
+            self.recorder.event("refocus", ok=ok)
+        if not ok:
+            raise RuntimeError("대상 창을 활성 창으로 만들지 못했습니다. 사용자가 창을 직접 클릭해야 합니다.")
 
     # ---------- 공통 유틸 ----------
     def _point(self, coord) -> tuple[int, int]:
@@ -69,8 +86,10 @@ class Executor:
         if handler is None:
             raise NotImplementedError(f"구현되지 않은 도구입니다: {name}")
         killswitch.check()
+        if name not in OBSERVE_ONLY:
+            self.ensure_focus()
         result = handler(inp)
-        if name not in ("screenshot", "zoom", "cursor_position", "wait"):
+        if name not in OBSERVE_ONLY:
             killswitch.sleep(self.action_delay)  # UI가 반응할 시간
         return result
 

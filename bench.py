@@ -40,7 +40,7 @@ from agent import context, loop  # noqa: E402
 from benchmark.metrics import format_table, summarize  # noqa: E402
 from benchmark.tasks import TASK_SET_VERSION, CheckContext, get_tasks  # noqa: E402
 from logs.recorder import Recorder  # noqa: E402
-from perception.capture import Screen  # noqa: E402
+from perception import window  # noqa: E402
 from safety import killswitch  # noqa: E402
 from safety.guard import Guard  # noqa: E402
 
@@ -110,7 +110,11 @@ def main() -> int:
     except ImportError as err:
         print(f"입력 백엔드 '{config.INPUT_BACKEND}'를 불러오지 못했습니다: {err}")
         return 2
-    screen = Screen(config.MAX_LONG_EDGE, config.MONITOR_INDEX)
+    try:
+        screen, win = window.open_screen(config.MAX_LONG_EDGE, config.MONITOR_INDEX, config.WINDOW)
+    except LookupError as err:
+        print(err)
+        return 2
     name = "bench-" + time.strftime("%Y%m%d-%H%M%S") + (f"-{args.label}" if args.label else "")
     out_dir = Path(config.RUNS_DIR) / name
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -128,6 +132,7 @@ def main() -> int:
         "context": context.resolve_strategy(config.CONTEXT, config.MODEL)[0],
         "prompt_cache": config.PROMPT_CACHE,
         "input_backend": backend.name,
+        "window": win.title if win else None,
         "kill_key": config.KILL_KEY,
         "game": {"fov": config.GAME_FOV, "counts_per_deg": config.GAME_COUNTS_PER_DEG},
         "clear": {"trigger": config.CLEAR_TRIGGER, "keep": config.CLEAR_KEEP,
@@ -166,7 +171,11 @@ def main() -> int:
                     task.setup()
 
                 recorder = Recorder(str(out_dir), task.goal, name=f"{task.id}-{trial}")
-                executor = Executor(screen, Guard(confirm=True), recorder, config.ACTION_DELAY, backend)
+                guard = Guard(confirm=True)
+                executor = Executor(screen, guard, recorder, config.ACTION_DELAY, backend)
+                if win:
+                    executor.focus_hwnd = win.hwnd
+                    guard.after_prompt = executor.ensure_focus
                 result = loop.RunResult()
                 started = time.perf_counter()
                 try:

@@ -19,7 +19,7 @@ from actions.assist import backend_warning  # noqa: E402
 from actions.executor import Executor  # noqa: E402
 from agent import context, loop  # noqa: E402
 from logs.recorder import Recorder  # noqa: E402
-from perception.capture import Screen  # noqa: E402
+from perception import window  # noqa: E402
 from safety import killswitch  # noqa: E402
 from safety.guard import Guard  # noqa: E402
 
@@ -35,16 +35,22 @@ def main() -> None:
         if config.KILL_KEY:
             killswitch.vk_code(config.KILL_KEY)  # 잘못된 키면 시작 전에 알린다
         backend = backends.create(config.INPUT_BACKEND)
-    except (ValueError, ImportError) as err:
+        screen, win = window.open_screen(config.MAX_LONG_EDGE, config.MONITOR_INDEX, config.WINDOW)
+    except (ValueError, ImportError, LookupError) as err:
         print(err)
         return
 
-    screen = Screen(config.MAX_LONG_EDGE, config.MONITOR_INDEX)
+    if win:
+        print(f"캡처 창: \"{win.title}\" ({win.rect[0]},{win.rect[1]}) — 이 창만 보고 조작합니다")
     print(f"화면 {screen.width}x{screen.height} → 스크린샷 {screen.shot_w}x{screen.shot_h} "
           f"(배율 {screen.scale:.3f})")
 
     recorder = Recorder(config.RUNS_DIR, goal)
-    executor = Executor(screen, Guard(confirm=True), recorder, config.ACTION_DELAY, backend)
+    guard = Guard(confirm=True)
+    executor = Executor(screen, guard, recorder, config.ACTION_DELAY, backend)
+    if win:
+        executor.focus_hwnd = win.hwnd
+        guard.after_prompt = executor.ensure_focus
     print(f"기록 폴더: {recorder.dir}")
     print(f"보조 도구: {', '.join(config.ASSIST) or '없음 (순수 computer use)'} · "
           f"컨텍스트 전략: {config.CONTEXT} · 입력 백엔드: {backend.name}")

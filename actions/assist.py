@@ -166,6 +166,9 @@ GROUP_TOOLS = {
 # 화면을 바꾸지 않거나 스스로 스크린샷을 돌려주는 도구 (루프가 자동 스크린샷을 붙이지 않음)
 OBSERVE_TOOLS = {"list_ui_elements", "wait_for_change"}
 
+# 입력을 보내는 도구 (실행 전에 대상 창 포커스를 확인)
+INPUT_TOOLS = {"click_element", "look", "look_at", "hold"}
+
 PROMPT_HINTS = {
     "uia": (
         "- list_ui_elements로 활성 창의 버튼, 입력칸 등의 이름과 좌표를 정확히 알 수 있습니다. "
@@ -227,6 +230,8 @@ class AssistTools:
         if not self.has(name):
             raise NotImplementedError(f"켜지지 않은 보조 도구입니다: {name}")
         killswitch.check()
+        if name in INPUT_TOOLS:
+            self.executor.ensure_focus()
         return getattr(self, f"do_{name}")(inp)
 
     # ---------- uia ----------
