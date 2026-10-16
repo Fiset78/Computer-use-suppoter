@@ -19,6 +19,44 @@ $env:ANTHROPIC_API_KEY = "sk-ant-..."
 uv run main.py "메모장을 열고 '안녕하세요'라고 입력해줘"
 ```
 
+## 프로필: Windows 조작 / 게임 조작 고르기
+
+무엇을 조작할지와 그에 맞는 설정을 `profiles/<이름>.toml` 파일 하나로 묶습니다. 시작할 때 메뉴에서 고르거나 `--profile`로 지정합니다.
+
+```
+=== 프로필 (profiles/) — 무엇을 조작할지 ===
+  1. Windows 조작 [Windows 조작]
+  2. 마인크래프트 [게임 조작]
+  0. 프로필 없이 (환경 변수 설정)   |   Enter → 프로필 없이
+프로필 선택: 2
+```
+
+```powershell
+uv run main.py --profile minecraft "나무 4개 모아줘"
+uv run main.py --profile desktop "메모장을 열어줘"
+uv run main.py --new-profile terraria --mode game --window Terraria   # 새 게임 프로필 템플릿
+```
+
+- `mode = "desktop"`이면 Windows 조작용 시스템 프롬프트를, `mode = "game"`이면 게임 플레이용 시스템 프롬프트를 씁니다. 게임 모드는 따로 적지 않으면 입력을 `directinput`, 보조 도구를 `game`으로 둡니다.
+- 프로필의 `prompt`(조작법, 규칙, 주의할 점)는 시스템 프롬프트 뒤에 "<이름> 안내"로 붙습니다.
+- 적용 순서: 명령줄 옵션 > 프로필 > 환경 변수 > 기본값. 프로필에 없는 항목은 그대로 둡니다. 오타 난 항목은 조용히 넘기지 않고 오류를 냅니다.
+- 프로필에 적은 `memory`, `refs`는 이어지는 메모·참고 자료 메뉴의 기본값이 됩니다 (Enter로 그대로 사용).
+- `bench.py --profile`도 됩니다. 어떤 프로필로 돌렸는지 `summary.json`에 남습니다.
+- 기본 프로필을 정하려면 `$env:PC_AGENT_PROFILE = "minecraft"` (메뉴에서 Enter를 누르면 이것을 씀).
+
+프로필 항목:
+
+| 항목 | 설명 |
+|---|---|
+| `name`, `mode` | 표시 이름, `desktop` 또는 `game` |
+| `window` | 이 문자열이 제목에 들어간 창만 캡처·조작 |
+| `input`, `assist` | 입력 백엔드, 보조 도구 목록 (게임 전용 코드가 있으면 여기서 켬, 예: `"minecraft"`) |
+| `memory`, `refs` | 지식 메모 파일, 참고 자료 목록 |
+| `prompt` | 이 게임/작업만의 안내 |
+| `model`, `max_steps`, `max_long_edge`, `monitor`, `action_delay`, `context`, `kill_key` | 같은 이름의 환경 변수와 같음 |
+| `[camera] fov`, `counts_per_deg` | game 도구의 시점 회전 |
+| `[click] settle`, `hold` | 클릭 타이밍 |
+
 ## 긴급 정지
 - **F12** 키를 누르면 눌려 있던 키/마우스 버튼을 즉시 전부 떼고 멈춥니다 (`PC_AGENT_KILL_KEY`로 변경, 게임에 포커스가 있어도 동작). API 응답을 기다리는 중이면 응답이 온 뒤 다음 행동 전에 멈춥니다.
 - 마우스를 **화면 왼쪽 위 모서리**로 급히 옮겨도 멈춥니다. 단, 커서를 붙잡아 두는 게임에서는 동작하지 않으니 F12를 쓰세요.
@@ -239,6 +277,7 @@ uv run pytest
 | `PC_AGENT_REFS_MAX_CHARS` | `20000` | 참고 자료 텍스트 전체 최대 글자 수 |
 | `PC_AGENT_MEMORY_DIR` / `PC_AGENT_REFS_DIR` | `memory` / `refs` | 시작 메뉴가 보여줄 폴더 |
 | `PC_AGENT_CLICK_SETTLE` / `_HOLD` | 백엔드 기본값 | 커서 이동 후 클릭까지 / 버튼을 누르고 있는 시간(초). directinput 0.05 / 0.05, pyautogui 0 / 0 |
+| `PC_AGENT_PROFILE` / `PC_AGENT_PROFILES_DIR` | (없음) / `profiles` | 기본 프로필 / 프로필 폴더 |
 | `PC_AGENT_KILL_KEY` | `f12` | 긴급 정지 단축키 (F1~F24, `pause`, `scrolllock`). 빈 값이면 끔 |
 | `PC_AGENT_GAME_FOV` | `70` | game 도구: 게임의 세로 시야각(도) |
 | `PC_AGENT_GAME_COUNTS_PER_DEG` | `6.667` | game 도구: 시점 1도당 마우스 이동량 (마인크래프트 기본 감도) |

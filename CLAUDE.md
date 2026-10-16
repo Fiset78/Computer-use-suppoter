@@ -4,7 +4,8 @@ Claude API의 computer use(`computer_toolset_20260801`)를 직접 구동하는 W
 최종 목표: 순수 computer use 기준 성능을 먼저 측정한 뒤, 보조 기능(UIA 요소 트리, 화면 변화 감지 등)을 붙여 개선 폭을 비교한다. 이후 마인크래프트 에이전트로 확장할 예정이다.
 
 ## 실행
-- `uv sync` 후 `uv run main.py [--memory 파일] [--ref 파일 ...] [--pick|--no-pick] "목표"` (memory/, refs/에 파일이 있으면 시작 메뉴로 고름)
+- `uv sync` 후 `uv run main.py [--profile 이름] [--memory 파일] [--ref 파일 ...] [--pick|--no-pick] "목표"` (시작 메뉴: 프로필 → 메모 → 참고 자료)
+- 프로필: `profiles/<이름>.toml` (mode = desktop | game). 새 프로필은 `uv run main.py --new-profile 이름 --mode game --window 창제목`
 - 환경 변수: `ANTHROPIC_API_KEY` (필수), `PC_AGENT_MODEL`, `PC_AGENT_MAX_STEPS`, `PC_AGENT_MAX_LONG_EDGE`, `PC_AGENT_MONITOR`, `PC_AGENT_ASSIST` (보조 도구: uia, wait, game, minecraft, all), `PC_AGENT_CONTEXT` (server, prune, none), `PC_AGENT_INPUT` (pyautogui, directinput), `PC_AGENT_WINDOW` (이 제목의 창만 캡처/조작), `PC_AGENT_MEMORY` (지식 메모 파일), `PC_AGENT_REFS` (참고 자료, 쉼표 구분), `PC_AGENT_KILL_KEY` (기본 f12), `PC_AGENT_CLICK_SETTLE`/`_HOLD` (게임 클릭 타이밍), `PC_AGENT_GAME_FOV`, `PC_AGENT_GAME_COUNTS_PER_DEG`
 - 실행 기록: `runs/<시각>/` (스크린샷 PNG + actions.jsonl)
 - 벤치마크: `uv run bench.py [--tasks a,b] [--repeat N] [--label 이름] [--assist uia,wait] [--context server|prune|none] [--input pyautogui|directinput]` → `runs/bench-<시각>/` (results.jsonl, summary.json)
@@ -14,6 +15,7 @@ Claude API의 computer use(`computer_toolset_20260801`)를 직접 구동하는 W
 - `main.py`: 진입점. DPI 설정을 가장 먼저 호출한다 (pyautogui import 전)
 - `bench.py`: 벤치마크 진입점. 과제 반복 실행, 자동/수동 판정, 결과 저장
 - `agent/loop.py`: 에이전트 루프, 시스템 프롬프트, 배치 처리. `run()`은 `RunResult`(상태, 단계, 행동, 토큰, 캐시 토큰)를 반환
+- `agent/profiles.py`: 프로필 불러오기·검증·config 적용, 새 프로필 템플릿, 시작 메뉴. mode가 시스템 프롬프트(`loop.BASE_PROMPTS`)를 정함
 - `agent/memory.py`: 지식 메모 (remember/forget 도구, Markdown 파일, 첫 메시지 주입 문구). 작업 후 정리는 `loop.reflect`
 - `agent/refs.py`: 참고 자료 → content 블록(텍스트/이미지/PDF), 시작 메뉴 `pick()` (input/print 주입, 순수 로직)
 - `agent/context.py`: 컨텍스트 관리 (캐시 중단점, 서버 측 clearing 설정, 클라이언트 가지치기). 순수 모듈
@@ -64,7 +66,8 @@ Claude API의 computer use(`computer_toolset_20260801`)를 직접 구동하는 W
 10. [ ] 지식 메모: 플레이 사이에 지식 저장/재사용 (`PC_AGENT_MEMORY`) (구현 완료, 메모 유무에 따른 회차별 비교 필요)
 11. [ ] 참고 자료 고르기 + 시작 메뉴 (구현 완료)
 12. [ ] 마인크래프트 칸 찾기 `minecraft` (find_slots, click_slot, move_item 칸 번호) (구현 완료, 실제 게임에서 확인 필요)
-13. [ ] 이후: 게임용 시스템 프롬프트 프로필, 생각하는 동안 일시정지, 게임 상태 도구, 게임 과제 세트
+13. [x] 프로필: Windows 조작 / 게임 조작 선택, 게임별 설정·안내를 파일 하나로 (`profiles/`)
+14. [ ] 이후: 생각하는 동안 일시정지, 게임 상태 도구, 게임 과제 세트
 
 ## 규칙
 - 마우스/키보드 입력은 반드시 `executor.input`(입력 백엔드)을 통한다. 새 코드에서 pyautogui/pydirectinput를 직접 부르지 않는다
@@ -76,4 +79,6 @@ Claude API의 computer use(`computer_toolset_20260801`)를 직접 구동하는 W
 - 참고 자료(읽기 전용)와 지식 메모는 첫 user 메시지에만 넣는다. prune은 참고 이미지를 `protect`로 지키지 않으면 지워 버린다
 - 시작 메뉴는 게임 창 포커스 전에 띄운다 (`window.open_screen`보다 먼저)
 - 지식 메모는 첫 user 메시지에만 넣는다 (system/tools는 실행 중 고정). 작업 후 정리 단계에서는 remember/forget 외 도구를 실행하지 않는다
+- 새 게임은 코드가 아니라 프로필로 추가한다. 특정 게임 전용 코드가 필요하면 보조 도구 묶음으로 만들고 프로필의 assist로 켠다
+- 프로필 항목을 추가하면 `profiles.SIMPLE_KEYS`/`TABLE_KEYS`, 템플릿, README 표를 함께 고친다
 - 사용자 메시지/주석/로그는 한국어로 작성한다.

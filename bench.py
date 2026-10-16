@@ -11,6 +11,7 @@
     uv run bench.py --assist uia,wait     # 보조 도구를 켜고 측정 (기본: 끔 = 순수 computer use)
     uv run bench.py --context prune       # 컨텍스트 관리 전략 (server | prune | none)
     uv run bench.py --input directinput   # 입력 백엔드 (pyautogui | directinput)
+    uv run bench.py --profile desktop     # 프로필 적용 (그 뒤에 주는 옵션이 프로필보다 우선)
     uv run bench.py --memory memory/desk.md  # 지식 메모를 켜고 측정 (실행마다 메모가 쌓여 다음 실행에 쓰임)
 
 결과: runs/bench-<시각>[-label]/
@@ -37,7 +38,7 @@ import config  # noqa: E402
 from actions import backends  # noqa: E402
 from actions.assist import backend_warning  # noqa: E402
 from actions.executor import Executor  # noqa: E402
-from agent import context, loop, memory, refs  # noqa: E402
+from agent import context, loop, memory, profiles, refs  # noqa: E402
 from benchmark.metrics import format_table, summarize  # noqa: E402
 from benchmark.tasks import TASK_SET_VERSION, CheckContext, get_tasks  # noqa: E402
 from logs.recorder import Recorder  # noqa: E402
@@ -73,6 +74,8 @@ def main() -> int:
     parser.add_argument("--tasks", help="쉼표로 구분한 과제 id (기본: 전체)")
     parser.add_argument("--repeat", type=int, default=1, help="과제별 반복 횟수")
     parser.add_argument("--label", default="", help="결과 폴더 이름에 붙일 이름")
+    parser.add_argument("--profile", default=None,
+                        help="프로필 이름 또는 .toml 경로 (기본: PC_AGENT_PROFILE)")
     parser.add_argument("--assist", default=None,
                         help="보조 도구: uia, wait, all, none (기본: PC_AGENT_ASSIST 환경 변수)")
     parser.add_argument("--context", default=None,
@@ -87,7 +90,12 @@ def main() -> int:
     parser.add_argument("--no-pause", action="store_true", help="과제 사이에 Enter를 기다리지 않음")
     args = parser.parse_args()
 
+    profile = None
     try:
+        name = args.profile if args.profile is not None else config.PROFILE
+        if name and name.strip().lower() != "none":
+            profile = profiles.load(profiles.find(name.strip(), config.PROFILES_DIR))
+            profiles.apply(profile, config)
         if args.assist is not None:
             config.ASSIST = config.parse_assist(args.assist)
         if args.context is not None:
@@ -105,7 +113,7 @@ def main() -> int:
         if config.KILL_KEY:
             killswitch.vk_code(config.KILL_KEY)
         tasks = get_tasks([t.strip() for t in args.tasks.split(",")] if args.tasks else None)
-    except ValueError as err:
+    except (ValueError, OSError) as err:
         print(err)
         return 2
 
@@ -141,6 +149,8 @@ def main() -> int:
         "assist": config.ASSIST,
         "context": context.resolve_strategy(config.CONTEXT, config.MODEL)[0],
         "prompt_cache": config.PROMPT_CACHE,
+        "profile": {"name": profile.name, "file": str(profile.path)} if profile else None,
+        "mode": config.MODE,
         "input_backend": backend.name,
         "window": win.title if win else None,
         "refs": config.REFS,

@@ -117,3 +117,12 @@ REFS_MAX_CHARS = int(os.getenv("PC_AGENT_REFS_MAX_CHARS", "20000"))
 # main.py 시작 메뉴가 보여줄 폴더: 지식 메모 파일(.md)과 참고 자료
 MEMORY_DIR = os.getenv("PC_AGENT_MEMORY_DIR", "memory")
 REFS_DIR = os.getenv("PC_AGENT_REFS_DIR", "refs")
+
+# 프로필 (agent/profiles.py): 무엇을 조작할지와 그 설정. profiles/<이름>.toml
+PROFILES_DIR = os.getenv("PC_AGENT_PROFILES_DIR", "profiles")
+PROFILE = os.getenv("PC_AGENT_PROFILE", "").strip()   # 기본으로 쓸 프로필 이름 (시작 메뉴의 Enter)
+
+# 아래 셋은 프로필을 적용하면 채워진다
+MODE = "desktop"        # desktop = Windows 조작, game = 게임 조작 (시스템 프롬프트가 달라짐)
+PROFILE_NAME = ""
+PROFILE_PROMPT = ""     # 프로필의 prompt (이 게임/작업만의 안내)
