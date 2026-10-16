@@ -18,6 +18,7 @@ ACTIONS = (
     "left_click_drag", "mouse_move", "left_mouse_down", "left_mouse_up", "scroll",
     "type", "key", "hold_key", "wait",
     "look",  # 툴셋에는 없는 추가 행동: 마우스 상대 이동 (커서가 고정된 게임의 시점 돌리기)
+    "watch", "hold_until",  # 추가 행동: 연속 장면 보기, 내 PC에서 감시하며 키 누르기
 )
 OBSERVE_ACTIONS = {"screenshot", "zoom"}
 MAX_ACTIONS = 20
@@ -44,6 +45,11 @@ COMPUTER_TOOL_SCHEMA = {
                     "repeat": {"type": "integer", "minimum": 1},
                     "region": {"type": "array", "items": {"type": "integer"}, "minItems": 4, "maxItems": 4},
                     "delta": {"type": "array", "items": {"type": "integer"}, "minItems": 2, "maxItems": 2},
+                    "frames": {"type": "integer", "minimum": 2, "maximum": 6},
+                    "interval": {"type": "number", "minimum": 0.2, "maximum": 2},
+                    "until": {"type": "string", "enum": ["change", "still"]},
+                    "max_duration": {"type": "number", "minimum": 0.5, "maximum": 30},
+                    "threshold": {"type": "number", "minimum": 0, "maximum": 1},
                 },
                 "required": ["action"],
                 "additionalProperties": False,
@@ -79,6 +85,12 @@ Windows PC의 마우스와 키보드를 조작합니다. actions 배열의 행�
   마인크래프트 기본 감도(100%)에서는 delta 600 ≈ 90도, 1200 ≈ 180도입니다 (위아래도 같은 비율).
   감도가 다른 게임은 한 번 돌려 보고 결과(F3 Facing 등)를 보며 맞추세요.
   결과에 "주의: 시점이 돌지 않았을 가능성"이 나오면 게임이 마우스를 잡고 있지 않은 것이니 게임 화면부터 되돌리세요.
+- watch: interval초(기본 0.5) 간격으로 frames장(기본 4, 최대 6)을 작게 찍어 한 번에 봅니다. 움직이는 화면에서
+  무엇이 어느 방향으로 움직이는지 볼 때 씁니다 (몹이 다가오는지, 떨어지는 중인지 등). 이 작은 장면의 좌표는 클릭에 쓰지 마세요.
+- hold_until: text 키(생략 가능)를 누른 채, 내 PC가 interval초(기본 0.5)마다 화면을 비교하다가 조건이 되면 스스로 멈춥니다.
+  until="still": 화면이 멈추면 (예: 걷다가 벽에 막힘, 로딩 끝) / until="change": 처음 화면에서 크게 바뀌면 (예: 무언가 나타남).
+  max_duration초(기본 5, 최대 30)가 지나면 멈춥니다. threshold로 민감도를 바꿀 수 있습니다 (still 기본 0.01, change 기본 0.03).
+  예: {"action": "hold_until", "text": "w", "until": "still", "max_duration": 10} = 막힐 때까지 앞으로 걷기
 
 예: {"actions": [{"action": "left_click", "coordinate": [640, 360]}, {"action": "type", "text": "안녕"}, {"action": "key", "text": "Return"}]}"""
 

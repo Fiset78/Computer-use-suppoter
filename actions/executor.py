@@ -12,6 +12,7 @@ import pyperclip
 
 from actions.backends import InputBackend, PyAutoGuiBackend, StopRequested
 from actions.keys import parse_combo, parse_modifiers
+from perception import diff
 from perception.capture import Screen, to_image_block
 from safety.guard import Guard
 
@@ -221,3 +222,53 @@ class Executor:
     def do_wait(self, inp):
         time.sleep(min(float(inp.get("duration", 1)), 300))
         return "OK"
+
+    # ---------- 연속 장면 / 내 PC에서 감시 ----------
+    WATCH_EDGE = 640        # watch 장면의 긴 변(px). 작게 보내 사용량을 줄인다 (장당 약 300토큰)
+    WATCH_MAX_FRAMES = 6
+
+    def do_watch(self, inp):
+        """interval초 간격으로 frames장을 작게 찍어 한꺼번에 돌려준다 (움직임·방향 파악용)."""
+        frames = max(2, min(self.WATCH_MAX_FRAMES, int(inp.get("frames", 4))))
+        interval = max(0.2, min(2.0, float(inp.get("interval", 0.5))))
+        shots = []
+        start = time.perf_counter()
+        for i in range(frames):
+            if i:
+                time.sleep(interval)
+                self.check_stop()
+            shots.append((time.perf_counter() - start, self.screen.capture()))
+        first, last = shots[0][1], shots[-1][1]
+        moved = diff.change_ratio(first, last)
+        blocks = [{"type": "text", "text": (
+            f"{interval:.1f}초 간격 장면 {frames}장 (작게 줄인 화면이라 좌표를 클릭에 쓰지 마세요. "
+            f"처음과 끝의 변화 비율 {moved:.3f})")}]
+        for t, img in shots:
+            small = img.copy()
+            small.thumbnail((self.WATCH_EDGE, self.WATCH_EDGE))
+            if self.recorder:
+                self.recorder.image(small, "watch")
+            blocks += [{"type": "text", "text": f"{t:.1f}초"}, to_image_block(small)]
+        return blocks
+
+    def do_hold_until(self, inp):
+        """키를 누른 채(또는 누르지 않고) 내 PC에서 interval초마다 화면을 비교하다가 조건이 되면 멈춘다.
+        Claude를 매번 부르지 않으므로 0.5초 단위로 반응한다."""
+        until = inp.get("until", "still")
+        max_duration = max(0.5, min(30.0, float(inp.get("max_duration", inp.get("duration", 5)))))
+        interval = max(0.2, min(2.0, float(inp.get("interval", 0.5))))
+        threshold = inp.get("threshold")
+        combo = parse_combo(inp["text"]) if inp.get("text") else []
+        if combo:
+            self.input.check_keys(combo)
+            self.guard.check_key(combo)
+
+        def grab():
+            self.check_stop()  # 정지 버튼·음성 정지가 감시 중에도 먹히게
+            return self.screen.capture()
+
+        with self._hold(combo):
+            result = diff.monitor(grab, until, max_duration, interval,
+                                  float(threshold) if threshold is not None else None)
+        held = f"{'+'.join(combo)} 키를 누른 채 " if combo else ""
+        return f"OK: {held}{result.describe(until)}"

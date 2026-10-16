@@ -76,3 +76,58 @@ def wait_for_change(grab: Callable[[], Image.Image], baseline: Image.Image, time
             return WaitResult(changed_after is not None, settled, changed_after, now, img)
         prev = img
         sleep(poll)
+
+
+# ---------- 내 PC에서 짧은 간격으로 감시하기 (hold_until) ----------
+# 게임 화면은 물·몹·구름 때문에 늘 조금씩 바뀌므로, 판정 기준을 wait_for_change보다 넉넉하게 잡는다
+MONITOR_CHANGE = 0.03   # 시작 화면 대비 바뀐 픽셀 비율이 이보다 크면 '크게 바뀜'
+MONITOR_STILL = 0.01    # 직전 화면 대비 바뀐 비율이 이보다 작으면 '멈춤'
+STILL_SAMPLES = 2       # 멈춤이 이만큼 연속돼야 멈춘 것으로 본다 (걷다 잠깐 끊긴 것과 구분)
+
+
+@dataclass
+class MonitorResult:
+    met: bool          # 조건을 만족해서 멈췄는지 (아니면 시간 초과)
+    elapsed: float
+    samples: int
+    ratio: float       # 마지막 판정에 쓴 변화 비율
+    image: Image.Image
+
+    def describe(self, until: str) -> str:
+        what = "화면이 크게 바뀌어" if until == "change" else "화면이 멈춰"
+        if self.met:
+            return f"{self.elapsed:.1f}초 만에 {what} 멈췄습니다 (변화 비율 {self.ratio:.3f}, 확인 {self.samples}회)."
+        return (f"{self.elapsed:.1f}초 동안 조건이 맞지 않아 시간 초과로 멈췄습니다 "
+                f"(마지막 변화 비율 {self.ratio:.3f}, 확인 {self.samples}회).")
+
+
+def monitor(grab: Callable[[], Image.Image], until: str, max_duration: float, interval: float = 0.5,
+            threshold: float | None = None, clock: Callable[[], float] = time.perf_counter,
+            sleep: Callable[[float], None] = time.sleep) -> MonitorResult:
+    """interval초마다 화면을 찍어 비교한다.
+    until="change": 처음 화면과 비교해 threshold(기본 MONITOR_CHANGE)보다 많이 바뀌면 멈춘다.
+    until="still":  바로 앞 화면과 비교해 threshold(기본 MONITOR_STILL)보다 덜 바뀐 상태가
+                    STILL_SAMPLES번 이어지면 멈춘다 (예: 걷다가 벽에 막힘, 로딩 끝)."""
+    if until not in ("change", "still"):
+        raise ValueError(f"알 수 없는 조건: {until} (change 또는 still)")
+    limit = threshold if threshold is not None else (MONITOR_CHANGE if until == "change" else MONITOR_STILL)
+    start = clock()
+    first = prev = grab()
+    samples, still_run, ratio = 0, 0, 0.0
+    while True:
+        sleep(interval)
+        img = grab()
+        samples += 1
+        now = clock() - start
+        if until == "change":
+            ratio = change_ratio(first, img)
+            if ratio > limit:
+                return MonitorResult(True, now, samples, ratio, img)
+        else:
+            ratio = change_ratio(prev, img)
+            still_run = still_run + 1 if ratio < limit else 0
+            if still_run >= STILL_SAMPLES:
+                return MonitorResult(True, now, samples, ratio, img)
+        if now >= max_duration:
+            return MonitorResult(False, now, samples, ratio, img)
+        prev = img

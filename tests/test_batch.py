@@ -73,7 +73,7 @@ def test_failsafe_propagates():
 
 
 def test_schema_lists_all_actions():
-    assert len(batch.ACTIONS) == 18 and "look" in batch.ACTIONS  # 툴셋 17개 + 게임용 look
+    assert len(batch.ACTIONS) == 20 and {"look", "watch", "hold_until"} <= set(batch.ACTIONS)  # 툴셋 17개 + 게임용 3개
     enum = batch.COMPUTER_TOOL_SCHEMA["properties"]["actions"]["items"]["properties"]["action"]["enum"]
     assert set(enum) == set(batch.ACTIONS)
 
