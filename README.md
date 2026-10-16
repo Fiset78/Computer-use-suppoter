@@ -93,7 +93,7 @@ powershell -ExecutionPolicy Bypass -File install_shortcut.ps1
 ## 마인크래프트 조작 테스트
 `prompts/minecraft_controls.txt`는 이동·점프·시점·부수기·놓기·인벤토리·채팅 등 기본 조작을 하나씩 확인하고 표로 보고하는 프롬프트입니다.
 ```powershell
-$env:PC_AGENT_INPUT = "directinput"   # 게임 입력 (시점 돌리기 look은 이 백엔드에서만 동작)
+$env:PC_AGENT_INPUT = "directinput"   # 게임 입력 권장 (시점 돌리기 look은 두 입력 방식 모두에서 동작)
 uv run main.py -f prompts\minecraft_controls.txt
 ```
 실행 창에서는 입력칸에 `@prompts\minecraft_controls.txt`를 넣고 실행합니다.

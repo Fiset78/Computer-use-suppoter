@@ -86,11 +86,34 @@ def test_look_sends_relative_moves_in_small_steps():
         def __init__(self):
             self.moves = []
 
+        def position(self):
+            return (960, 540)  # 게임이 마우스를 잡고 있어 커서가 가운데 고정
+
         def move_rel(self, dx, dy):
             self.moves.append((dx, dy))
 
     b = Backend()
     ex = Executor(screen=None, guard=Guard(confirm=False), backend=b, action_delay=0)
-    ex.do_look({"delta": [250, -70]})
+    assert ex.do_look({"delta": [250, -70]}).startswith("OK")
     assert sum(m[0] for m in b.moves) == 250 and sum(m[1] for m in b.moves) == -70
     assert all(abs(m[0]) <= Executor.LOOK_STEP and abs(m[1]) <= Executor.LOOK_STEP for m in b.moves)
+
+
+def test_look_warns_when_cursor_is_free():
+    from actions.executor import Executor
+    from safety.guard import Guard
+
+    class FreeCursor:  # 메뉴가 열려 커서가 실제로 따라 움직이는 상황
+        def __init__(self):
+            self.x, self.y = 500, 500
+
+        def position(self):
+            return (self.x, self.y)
+
+        def move_rel(self, dx, dy):
+            self.x += dx
+            self.y += dy
+
+    ex = Executor(screen=None, guard=Guard(confirm=False), backend=FreeCursor(), action_delay=0)
+    out = ex.do_look({"delta": [600, 0]})
+    assert out.startswith("주의") and "600px" in out

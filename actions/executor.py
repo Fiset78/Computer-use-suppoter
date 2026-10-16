@@ -130,9 +130,14 @@ class Executor:
     LOOK_STEP = 60   # 한 번에 보내는 상대 이동 크기 (너무 크면 일부 게임이 한 번에 받지 못함)
     LOOK_LIMIT = 5000
 
+    LOOK_FREE_CURSOR = 25  # look 뒤 커서가 이만큼(px) 넘게 움직였으면 게임이 마우스를 잡고 있지 않은 것
+
     def do_look(self, inp):
-        """게임 시점 돌리기: 상대 이동을 잘게 나눠 보낸다 (directinput 백엔드에서만 시점이 돈다)."""
+        """게임 시점 돌리기: 마우스 상대 이동 신호를 잘게 나눠 보낸다.
+        게임이 마우스를 잡고 있으면 커서는 가운데에 고정돼 움직이지 않는다. 커서가 움직였다면
+        일시정지 메뉴·채팅·인벤토리가 열려 있거나 게임 창이 맨 앞이 아니라서 시점이 돌지 않은 것이다."""
         dx, dy = (max(-self.LOOK_LIMIT, min(self.LOOK_LIMIT, int(v))) for v in inp["delta"])
+        before = self.input.position()
         steps = max(1, -(-max(abs(dx), abs(dy)) // self.LOOK_STEP))
         sent_x = sent_y = 0
         for i in range(1, steps + 1):
@@ -140,6 +145,13 @@ class Executor:
             self.input.move_rel(tx - sent_x, ty - sent_y)
             sent_x, sent_y = tx, ty
             time.sleep(0.01)
+        time.sleep(0.05)
+        after = self.input.position()
+        moved = round(((after[0] - before[0]) ** 2 + (after[1] - before[1]) ** 2) ** 0.5)
+        if moved > self.LOOK_FREE_CURSOR:
+            return (f"주의: 시점이 돌지 않았을 가능성이 큽니다. 마우스 커서가 화면에서 {moved}px 움직였습니다 "
+                    "(게임이 마우스를 잡고 있으면 커서는 움직이지 않음). 일시정지 메뉴·채팅·인벤토리가 열려 있거나 "
+                    "게임 창이 맨 앞이 아닙니다. 게임 화면으로 돌아간 뒤 다시 look 하세요.")
         return f"OK (시점 이동 {dx}, {dy})"
 
     def do_mouse_move(self, inp):

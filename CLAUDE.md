@@ -50,7 +50,7 @@ Claude로 Windows PC를 조작하는 에이전트 하네스. 리서치/실험용
 - 긴급 정지는 도구 결과로 숨기지 않고 `_Tools.abort`에 담아 루프가 interrupt 후 다시 올린다
 - MCP 이미지 형식은 `{"type": "image", "data", "mimeType"}` (`batch.to_mcp_content`로 변환)
 - 도구 결과 맨 앞에 `[단계 n/N · 남은 단계 k]`를 붙인다. `MAX_CHAIN > 1`이면 `handoff` 도구를 함께 등록해, 단계가 거의 찼을 때 Claude가 다음 실행에 작업을 넘긴다
-- `computer` 도구에는 툴셋 17개 외에 게임용 `look`(delta [dx, dy] 마우스 상대 이동)이 있다. 커서가 고정된 게임의 시점 돌리기용이며 directinput 백엔드에서만 시점이 돈다
+- `computer` 도구에는 툴셋 17개 외에 게임용 `look`(delta [dx, dy] 마우스 상대 이동)이 있다. 커서가 고정된 게임의 시점 돌리기용. 두 백엔드 모두 `backends.send_relative_mouse`(SendInput 상대 이동 = raw input에 잡힘)로 보낸다. look 전후 커서가 움직였으면 게임이 마우스를 잡지 않은 상태(메뉴·포커스 없음)라고 결과에 알린다. 마인크래프트 기본 감도에서 delta 600 ≈ 90도
 
 ## computer_toolset_20260801 규칙 (api 엔진) (어기면 API가 요청을 거부함)
 - beta 헤더 없음. `client.messages.create`의 `tools=[{"type": "computer_toolset_20260801"}]`
