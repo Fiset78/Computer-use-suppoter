@@ -21,6 +21,7 @@ from actions.assist import AssistTools
 from actions.executor import Executor
 from agent import context
 from logs.recorder import Recorder
+from safety import killswitch
 
 TOOLSET = "computer"
 NOT_EXECUTED = "Not executed: an earlier computer action in this turn failed."
@@ -145,7 +146,8 @@ def run(goal: str, executor: Executor, recorder: Recorder, stats: RunResult | No
     stats를 넘기면 그 객체를 채워 나가므로, 중간에 예외로 멈춰도 그때까지의 통계가 남는다."""
     stats = stats if stats is not None else RunResult()
     client = Anthropic()  # ANTHROPIC_API_KEY 환경 변수 사용
-    assist = AssistTools(executor, config.ASSIST) if config.ASSIST else None
+    assist = (AssistTools(executor, config.ASSIST, config.GAME_FOV, config.GAME_COUNTS_PER_DEG)
+              if config.ASSIST else None)
     tools = [{"type": "computer_toolset_20260801"}] + (assist.tool_defs() if assist else [])
     # system과 tools는 실행 중에 절대 바꾸지 않는다 (캐시와 preserved thinking이 모두 깨짐)
     system = context.system_blocks(build_system_prompt(assist), cache=config.PROMPT_CACHE)
@@ -165,6 +167,7 @@ def run(goal: str, executor: Executor, recorder: Recorder, stats: RunResult | No
     }]
 
     for step in range(1, config.MAX_STEPS + 1):
+        killswitch.check()
         if strategy == "prune":
             pruned = context.prune_images(messages, config.PRUNE_KEEP, config.PRUNE_BATCH)
             if pruned:

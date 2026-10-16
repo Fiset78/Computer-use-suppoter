@@ -8,7 +8,8 @@ def test_parse_assist():
     assert parse_assist("") == []
     assert parse_assist("none") == []
     assert parse_assist("wait, UIA") == ["uia", "wait"]
-    assert parse_assist("all") == ["uia", "wait"]
+    assert parse_assist("all") == ["uia", "wait", "game"]
+    assert parse_assist("game") == ["game"]
 
 
 def test_parse_assist_unknown():

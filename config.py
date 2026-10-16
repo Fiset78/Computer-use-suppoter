@@ -24,10 +24,11 @@ AUTO_SCREENSHOT = True
 RUNS_DIR = os.getenv("PC_AGENT_RUNS_DIR", "runs")
 
 
-# 켤 보조 도구 묶음 (로드맵 5단계). 쉼표로 구분: uia, wait, all. 비우면 순수 computer use (기준 성능).
+# 켤 보조 도구 묶음 (로드맵 5단계). 쉼표로 구분: uia, wait, game, all. 비우면 순수 computer use (기준 성능).
 #   uia  = list_ui_elements + click_element (Windows UI Automation)
 #   wait = wait_for_change (화면 변화 감지)
-ASSIST_GROUPS = ("uia", "wait")
+#   game = look + look_at + hold (1인칭 게임의 시점 회전, 동시·지속 입력. directinput 백엔드와 함께 쓴다)
+ASSIST_GROUPS = ("uia", "wait", "game")
 
 
 def parse_assist(text: str | None) -> list[str]:
@@ -67,3 +68,15 @@ PRUNE_BATCH = int(os.getenv("PC_AGENT_PRUNE_BATCH", "10"))
 
 # 입력 백엔드 (로드맵 7단계): pyautogui (일반 앱, 기본) | directinput (게임, pydirectinput-rgx)
 INPUT_BACKEND = os.getenv("PC_AGENT_INPUT", "pyautogui").strip().lower()
+
+# 긴급 정지 단축키 (F1~F24, pause, scrolllock). 게임은 커서를 붙잡아서 '마우스를 모서리로'가 안 되므로 필요하다.
+# 빈 값이면 끈다.
+KILL_KEY = os.getenv("PC_AGENT_KILL_KEY", "f12").strip().lower()
+
+# game 보조 도구: 게임의 세로 시야각(도). 마인크래프트 기본 FOV는 70 ("FOV 효과"는 0%로 꺼 두는 것을 권장).
+GAME_FOV = float(os.getenv("PC_AGENT_GAME_FOV", "70"))
+
+# game 보조 도구: 시점 1도를 돌리는 데 필요한 마우스 상대 이동량(count).
+# 마인크래프트 Java: 1 count당 회전 = 1.2 × (감도×0.6 + 0.2)³ 도.
+# 기본 감도(화면 표시 100% = 내부값 0.5)면 0.15도/count → 6.667 count/도.
+GAME_COUNTS_PER_DEG = float(os.getenv("PC_AGENT_GAME_COUNTS_PER_DEG", "6.667"))

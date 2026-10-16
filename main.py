@@ -4,7 +4,7 @@
     uv run main.py "메모장을 열고 '안녕하세요'라고 입력해줘"
     uv run main.py            # 실행 후 목표를 입력
 
-긴급 정지: 마우스를 화면 왼쪽 위 모서리로 급히 옮기거나, 터미널에서 Ctrl+C
+긴급 정지: F12(PC_AGENT_KILL_KEY), 마우스를 화면 왼쪽 위 모서리로, 또는 터미널에서 Ctrl+C
 """
 import sys
 
@@ -15,10 +15,12 @@ enable_dpi_awareness()
 
 import config  # noqa: E402
 from actions import backends  # noqa: E402
+from actions.assist import backend_warning  # noqa: E402
 from actions.executor import Executor  # noqa: E402
 from agent import context, loop  # noqa: E402
 from logs.recorder import Recorder  # noqa: E402
 from perception.capture import Screen  # noqa: E402
+from safety import killswitch  # noqa: E402
 from safety.guard import Guard  # noqa: E402
 
 
@@ -30,6 +32,8 @@ def main() -> None:
 
     try:
         context.resolve_strategy(config.CONTEXT, config.MODEL)
+        if config.KILL_KEY:
+            killswitch.vk_code(config.KILL_KEY)  # 잘못된 키면 시작 전에 알린다
         backend = backends.create(config.INPUT_BACKEND)
     except (ValueError, ImportError) as err:
         print(err)
@@ -44,7 +48,10 @@ def main() -> None:
     print(f"기록 폴더: {recorder.dir}")
     print(f"보조 도구: {', '.join(config.ASSIST) or '없음 (순수 computer use)'} · "
           f"컨텍스트 전략: {config.CONTEXT} · 입력 백엔드: {backend.name}")
-    print("긴급 정지: 마우스를 왼쪽 위 모서리로 / Ctrl+C\n")
+    if warning := backend_warning(config.ASSIST, backend.name):
+        print(warning)
+    watcher = killswitch.start_hotkey(config.KILL_KEY, on_trigger=backend.release_all)
+    print(killswitch.stop_hint(watcher) + "\n")
 
     try:
         result = loop.run(goal, executor, recorder)
@@ -52,6 +59,9 @@ def main() -> None:
         print(f"단계 {result.steps} · 행동 {result.actions} (실패 {result.action_errors}) · "
               f"토큰 입력 {result.input_tokens:,} + 캐시 읽기 {result.cache_read_tokens:,} "
               f"/ 캐시 쓰기 {result.cache_write_tokens:,} / 출력 {result.output_tokens:,}")
+    except killswitch.EmergencyStop:
+        print("\n긴급 정지 단축키로 멈췄습니다.")
+        recorder.event("abort", reason="kill_switch")
     except KeyboardInterrupt:
         print("\n사용자가 중단했습니다.")
         recorder.event("abort", reason="keyboard_interrupt")
@@ -61,6 +71,11 @@ def main() -> None:
         print("\n긴급 정지되었습니다 (마우스가 화면 모서리로 이동).")
         recorder.event("abort", reason="failsafe")
     finally:
+        released = backend.release_all()  # 눌린 채로 남은 키/버튼이 없게
+        if released:
+            recorder.event("release_all", inputs=released)
+        if watcher:
+            watcher.stop()
         recorder.close()
 
 

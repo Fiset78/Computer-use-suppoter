@@ -17,7 +17,7 @@
     summary.json    과제별/전체 요약 + 실행 조건(모델, 스크린샷 크기 등)
     <과제>-<회차>/  실행별 스크린샷과 actions.jsonl
 
-긴급 정지: 마우스를 왼쪽 위 모서리로 / Ctrl+C (그때까지의 결과는 저장된다)
+긴급 정지: F12(PC_AGENT_KILL_KEY) / 마우스를 왼쪽 위 모서리로 / Ctrl+C (그때까지의 결과는 저장된다)
 """
 import argparse
 import json
@@ -34,12 +34,14 @@ from anthropic import APIError  # noqa: E402
 
 import config  # noqa: E402
 from actions import backends  # noqa: E402
+from actions.assist import backend_warning  # noqa: E402
 from actions.executor import Executor  # noqa: E402
 from agent import context, loop  # noqa: E402
 from benchmark.metrics import format_table, summarize  # noqa: E402
 from benchmark.tasks import TASK_SET_VERSION, CheckContext, get_tasks  # noqa: E402
 from logs.recorder import Recorder  # noqa: E402
 from perception.capture import Screen  # noqa: E402
+from safety import killswitch  # noqa: E402
 from safety.guard import Guard  # noqa: E402
 
 
@@ -91,6 +93,8 @@ def main() -> int:
         if config.INPUT_BACKEND not in backends.BACKENDS:
             raise ValueError(f"알 수 없는 입력 백엔드: {config.INPUT_BACKEND} "
                              f"(사용 가능: {', '.join(backends.BACKENDS)})")
+        if config.KILL_KEY:
+            killswitch.vk_code(config.KILL_KEY)
         tasks = get_tasks([t.strip() for t in args.tasks.split(",")] if args.tasks else None)
     except ValueError as err:
         print(err)
@@ -124,6 +128,8 @@ def main() -> int:
         "context": context.resolve_strategy(config.CONTEXT, config.MODEL)[0],
         "prompt_cache": config.PROMPT_CACHE,
         "input_backend": backend.name,
+        "kill_key": config.KILL_KEY,
+        "game": {"fov": config.GAME_FOV, "counts_per_deg": config.GAME_COUNTS_PER_DEG},
         "clear": {"trigger": config.CLEAR_TRIGGER, "keep": config.CLEAR_KEEP,
                   "at_least": config.CLEAR_AT_LEAST},
         "prune": {"keep": config.PRUNE_KEEP, "batch": config.PRUNE_BATCH},
@@ -134,7 +140,10 @@ def main() -> int:
     print(f"결과 폴더: {out_dir}")
     print(f"모델 {config.MODEL} · 화면 {screen.width}x{screen.height} → {screen.shot_w}x{screen.shot_h} "
           f"· 과제 {len(tasks)}개 × {args.repeat}회 · 보조 도구 {','.join(config.ASSIST) or '없음'} · 컨텍스트 {meta['context']} · 입력 {backend.name}")
-    print("긴급 정지: 마우스를 왼쪽 위 모서리로 / Ctrl+C\n")
+    if warning := backend_warning(config.ASSIST, backend.name):
+        print(warning)
+    watcher = killswitch.start_hotkey(config.KILL_KEY, on_trigger=backend.release_all)
+    print(killswitch.stop_hint(watcher) + "\n")
 
     records: list[dict] = []
     results_file = open(out_dir / "results.jsonl", "a", encoding="utf-8")
@@ -176,6 +185,10 @@ def main() -> int:
                     result.status = "aborted"
                     result.final = type(err).__name__
                     stopped = True
+                finally:
+                    released = backend.release_all()
+                    if released:
+                        recorder.event("release_all", inputs=released)
                 seconds = time.perf_counter() - started
 
                 ctx = CheckContext(final=result.final, screen_size=(screen.width, screen.height))
@@ -199,6 +212,8 @@ def main() -> int:
             if stopped:
                 break
     finally:
+        if watcher:
+            watcher.stop()
         results_file.close()
         summary = summarize(records) if records else {"overall": None, "tasks": {}}
         meta["finished"] = time.strftime("%Y-%m-%d %H:%M:%S")

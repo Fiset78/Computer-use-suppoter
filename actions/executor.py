@@ -13,6 +13,7 @@ import pyperclip
 from actions.backends import InputBackend, PyAutoGuiBackend
 from actions.keys import parse_combo, parse_modifiers
 from perception.capture import Screen, to_image_block
+from safety import killswitch
 from safety.guard import Guard
 
 
@@ -67,9 +68,10 @@ class Executor:
         handler = getattr(self, f"do_{name}", None)
         if handler is None:
             raise NotImplementedError(f"구현되지 않은 도구입니다: {name}")
+        killswitch.check()
         result = handler(inp)
         if name not in ("screenshot", "zoom", "cursor_position", "wait"):
-            time.sleep(self.action_delay)  # UI가 반응할 시간
+            killswitch.sleep(self.action_delay)  # UI가 반응할 시간
         return result
 
     # ---------- 관찰 ----------
@@ -182,9 +184,9 @@ class Executor:
         self.guard.check_key(combo)
         duration = min(float(inp["duration"]), 300)
         with self._hold(combo):
-            time.sleep(duration)
+            killswitch.sleep(duration)
         return "OK"
 
     def do_wait(self, inp):
-        time.sleep(min(float(inp.get("duration", 1)), 300))
+        killswitch.sleep(min(float(inp.get("duration", 1)), 300))
         return "OK"
