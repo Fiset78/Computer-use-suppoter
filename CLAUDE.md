@@ -4,8 +4,8 @@ Claude API의 computer use(`computer_toolset_20260801`)를 직접 구동하는 W
 최종 목표: 순수 computer use 기준 성능을 먼저 측정한 뒤, 보조 기능(UIA 요소 트리, 화면 변화 감지 등)을 붙여 개선 폭을 비교한다. 이후 마인크래프트 에이전트로 확장할 예정이다.
 
 ## 실행
-- `uv sync` 후 `uv run main.py "목표"`
-- 환경 변수: `ANTHROPIC_API_KEY` (필수), `PC_AGENT_MODEL`, `PC_AGENT_MAX_STEPS`, `PC_AGENT_MAX_LONG_EDGE`, `PC_AGENT_MONITOR`, `PC_AGENT_ASSIST` (보조 도구: uia, wait, game, all), `PC_AGENT_CONTEXT` (server, prune, none), `PC_AGENT_INPUT` (pyautogui, directinput), `PC_AGENT_WINDOW` (이 제목의 창만 캡처/조작), `PC_AGENT_MEMORY` (지식 메모 파일), `PC_AGENT_KILL_KEY` (기본 f12), `PC_AGENT_GAME_FOV`, `PC_AGENT_GAME_COUNTS_PER_DEG`
+- `uv sync` 후 `uv run main.py [--memory 파일] [--ref 파일 ...] [--pick|--no-pick] "목표"` (memory/, refs/에 파일이 있으면 시작 메뉴로 고름)
+- 환경 변수: `ANTHROPIC_API_KEY` (필수), `PC_AGENT_MODEL`, `PC_AGENT_MAX_STEPS`, `PC_AGENT_MAX_LONG_EDGE`, `PC_AGENT_MONITOR`, `PC_AGENT_ASSIST` (보조 도구: uia, wait, game, all), `PC_AGENT_CONTEXT` (server, prune, none), `PC_AGENT_INPUT` (pyautogui, directinput), `PC_AGENT_WINDOW` (이 제목의 창만 캡처/조작), `PC_AGENT_MEMORY` (지식 메모 파일), `PC_AGENT_REFS` (참고 자료, 쉼표 구분), `PC_AGENT_KILL_KEY` (기본 f12), `PC_AGENT_GAME_FOV`, `PC_AGENT_GAME_COUNTS_PER_DEG`
 - 실행 기록: `runs/<시각>/` (스크린샷 PNG + actions.jsonl)
 - 벤치마크: `uv run bench.py [--tasks a,b] [--repeat N] [--label 이름] [--assist uia,wait] [--context server|prune|none] [--input pyautogui|directinput]` → `runs/bench-<시각>/` (results.jsonl, summary.json)
 - 테스트: `uv run pytest` (순수 모듈만)
@@ -15,6 +15,7 @@ Claude API의 computer use(`computer_toolset_20260801`)를 직접 구동하는 W
 - `bench.py`: 벤치마크 진입점. 과제 반복 실행, 자동/수동 판정, 결과 저장
 - `agent/loop.py`: 에이전트 루프, 시스템 프롬프트, 배치 처리. `run()`은 `RunResult`(상태, 단계, 행동, 토큰, 캐시 토큰)를 반환
 - `agent/memory.py`: 지식 메모 (remember/forget 도구, Markdown 파일, 첫 메시지 주입 문구). 작업 후 정리는 `loop.reflect`
+- `agent/refs.py`: 참고 자료 → content 블록(텍스트/이미지/PDF), 시작 메뉴 `pick()` (input/print 주입, 순수 로직)
 - `agent/context.py`: 컨텍스트 관리 (캐시 중단점, 서버 측 clearing 설정, 클라이언트 가지치기). 순수 모듈
 - `benchmark/tasks.py`: 고정 과제 세트 (setup/check). 과제를 바꾸면 `TASK_SET_VERSION`을 올린다
 - `benchmark/metrics.py`: 결과 집계와 표 출력 (순수 모듈)
@@ -60,7 +61,8 @@ Claude API의 computer use(`computer_toolset_20260801`)를 직접 구동하는 W
 8. [ ] 게임 보조 도구 `game` (look, look_at, hold) + 긴급 정지 단축키 + 종료 시 release_all (구현 완료, 마인크래프트에서 감도/FOV 보정과 동작 확인 필요)
 9. [ ] 게임 창만 캡처 + 입력 전 포커스 되돌리기 (`PC_AGENT_WINDOW`) (구현 완료, Windows에서 확인 필요)
 10. [ ] 지식 메모: 플레이 사이에 지식 저장/재사용 (`PC_AGENT_MEMORY`) (구현 완료, 메모 유무에 따른 회차별 비교 필요)
-11. [ ] 이후: 게임용 시스템 프롬프트 프로필, 생각하는 동안 일시정지, 게임 상태 도구, 게임 과제 세트
+11. [ ] 참고 자료 고르기 + 시작 메뉴 (구현 완료)
+12. [ ] 이후: 게임용 시스템 프롬프트 프로필, 생각하는 동안 일시정지, 게임 상태 도구, 게임 과제 세트
 
 ## 규칙
 - 마우스/키보드 입력은 반드시 `executor.input`(입력 백엔드)을 통한다. 새 코드에서 pyautogui/pydirectinput를 직접 부르지 않는다
@@ -68,5 +70,7 @@ Claude API의 computer use(`computer_toolset_20260801`)를 직접 구동하는 W
 - 행동 실행 중 기다릴 때는 `time.sleep` 대신 `killswitch.sleep`을 쓴다 (긴급 정지 시 바로 깨어남). 실행이 끝나면 `backend.release_all()`로 눌린 입력을 전부 뗀다
 - 입력을 보내는 새 도구는 실행 전에 `executor.ensure_focus()`를 거친다 (Executor는 `OBSERVE_ONLY` 외 전부, 보조 도구는 `INPUT_TOOLS`)
 - 이 코드는 Windows에서만 실제로 동작한다. Linux/CI에서는 순수 모듈과, `tests/conftest.py`의 가짜 `pyautogui`로 루프 로직만 테스트한다 (`uv run pytest`).
+- 참고 자료(읽기 전용)와 지식 메모는 첫 user 메시지에만 넣는다. prune은 참고 이미지를 `protect`로 지키지 않으면 지워 버린다
+- 시작 메뉴는 게임 창 포커스 전에 띄운다 (`window.open_screen`보다 먼저)
 - 지식 메모는 첫 user 메시지에만 넣는다 (system/tools는 실행 중 고정). 작업 후 정리 단계에서는 remember/forget 외 도구를 실행하지 않는다
 - 사용자 메시지/주석/로그는 한국어로 작성한다.

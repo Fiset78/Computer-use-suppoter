@@ -158,6 +158,32 @@ uv run main.py "나무 블록 4개를 모아줘"
 - 파일은 사람이 읽고 고칠 수 있는 Markdown입니다 (`- [날짜] 내용` 한 줄에 하나). 게임 속 표지판이나 채팅 글이 메모로 옮겨져 다음 실행에 영향을 줄 수 있으니 가끔 직접 훑어보세요.
 - 과제(게임)마다 다른 파일을 쓰는 것을 권장합니다. 기준 성능을 잴 때는 끄고, 켠 상태와 비교하려면 `bench.py --memory memory/desk.md --repeat 5`처럼 반복하면 메모가 쌓이며 회차별 변화를 볼 수 있습니다. 실행 기록에는 `memory_add`/`memory_forget` 이벤트가 남습니다.
 
+## 참고 자료와 메모 고르기 (시작 메뉴)
+
+`memory/`나 `refs/` 폴더에 파일이 있으면 `main.py`를 실행할 때 쓸 파일을 번호로 고르는 메뉴가 나옵니다.
+
+```
+=== 지식 메모 (memory/) — Claude가 읽고 고치는 파일 하나 ===
+  1. minecraft.md
+  0. 쓰지 않음   |   새 이름 입력 → 새 메모 파일   |   Enter → 쓰지 않음
+메모 선택: 1
+
+=== 참고 자료 (refs/) — 읽기 전용, 여러 개 선택 가능 ===
+  1. 제작법.png
+  2. 조작법.md
+  예: 1,3 또는 2-4   |   0 → 고르지 않음   |   Enter → 고르지 않음
+참고 자료 선택: 1-2
+```
+
+- **지식 메모**는 하나만 고르며, Claude가 `remember`/`forget`으로 고칩니다. 없는 이름을 입력하면 새 메모 파일을 만듭니다.
+- **참고 자료**는 여러 개 고를 수 있고 읽기 전용입니다. 공략, 조작법, 제작법 그림, 설명서처럼 사람이 준비한 자료를 넣으세요. 첫 메시지에 "사용자가 고른 참고 자료"로 들어갑니다.
+  - 텍스트(`.md .txt .json .csv .yaml .log`): 모두 합쳐 20,000자까지 (`PC_AGENT_REFS_MAX_CHARS`)
+  - 이미지(`.png .jpg .gif .webp`), PDF: 파일당 5MB까지
+- 메뉴 없이 지정하기: `uv run main.py --memory memory/mc.md --ref refs/조작법.md --ref refs/제작법.png "목표"` 또는 환경 변수 `PC_AGENT_MEMORY`, `PC_AGENT_REFS`(쉼표 구분). 메뉴에서 Enter를 누르면 이 값이 그대로 유지됩니다.
+- `--no-pick`: 메뉴를 건너뜀 / `--pick`: 폴더가 비어 있어도 메뉴를 보여줌. `bench.py`는 메뉴 없이 `--memory`, `--ref`로 지정합니다.
+- 메뉴는 게임 창으로 포커스를 옮기기 전에 나오므로, 터미널에서 답하면 됩니다.
+- 참고 자료는 첫 메시지에 들어가 대화 내내 입력 토큰을 차지합니다 (prompt caching으로 대부분 캐시 읽기 가격). 꼭 필요한 것만 고르세요. `prune` 전략도 참고 이미지는 지우지 않습니다.
+
 ## 테스트
 
 GUI 없이 돌릴 수 있는 로직만 테스트합니다: 키 변환, 시점 회전 계산과 game 도구, 긴급 정지, 결과 집계, 요소 목록 형식, 화면 변화 판정, 컨텍스트 관리, 그리고 입력 백엔드, 가짜 `pyautogui`/`pydirectinput`와 가짜 API 클라이언트로 에이전트 루프의 tool_result 규칙과 요청 형태.
@@ -179,6 +205,9 @@ uv run pytest
 | `PC_AGENT_WINDOW` | (없음) | 이 문자열이 제목에 들어간 창만 캡처하고, 입력 전에 활성 창으로 만듦 |
 | `PC_AGENT_MEMORY` | (없음) | 지식 메모 파일. 비우면 끔 |
 | `PC_AGENT_MEMORY_REFLECT` / `_MAX_CHARS` | `1` / `4000` | 작업 후 교훈 정리 여부 / 첫 메시지에 넣을 메모 최대 글자 수 |
+| `PC_AGENT_REFS` | (없음) | 참고 자료 파일들 (쉼표 구분) |
+| `PC_AGENT_REFS_MAX_CHARS` | `20000` | 참고 자료 텍스트 전체 최대 글자 수 |
+| `PC_AGENT_MEMORY_DIR` / `PC_AGENT_REFS_DIR` | `memory` / `refs` | 시작 메뉴가 보여줄 폴더 |
 | `PC_AGENT_KILL_KEY` | `f12` | 긴급 정지 단축키 (F1~F24, `pause`, `scrolllock`). 빈 값이면 끔 |
 | `PC_AGENT_GAME_FOV` | `70` | game 도구: 게임의 세로 시야각(도) |
 | `PC_AGENT_GAME_COUNTS_PER_DEG` | `6.667` | game 도구: 시점 1도당 마우스 이동량 (마인크래프트 기본 감도) |

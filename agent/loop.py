@@ -19,7 +19,7 @@ from actions.assist import OBSERVE_TOOLS as ASSIST_OBSERVE_TOOLS
 from actions import backends
 from actions.assist import AssistTools
 from actions.executor import Executor
-from agent import context, memory
+from agent import context, memory, refs
 from logs.recorder import Recorder
 from safety import killswitch
 
@@ -232,6 +232,11 @@ def run(goal: str, executor: Executor, recorder: Recorder, stats: RunResult | No
     notes = mem.prompt_text() if mem else None
     if notes:
         first.append({"type": "text", "text": notes})
+    loaded = refs.load(config.REFS, config.REFS_MAX_CHARS) if config.REFS else refs.LoadedRefs()
+    if loaded.used or loaded.skipped:
+        print(f"참고 자료: {len(loaded.used)}개" + (f" (건너뜀: {'; '.join(loaded.skipped)})" if loaded.skipped else ""))
+        recorder.event("refs", used=loaded.used, skipped=loaded.skipped)
+    first += loaded.blocks
     first += [{"type": "text", "text": "아래는 현재 화면입니다."}, executor.screenshot_block("initial")]
     messages: list[dict] = [{"role": "user", "content": first}]
 
@@ -287,7 +292,8 @@ def run(goal: str, executor: Executor, recorder: Recorder, stats: RunResult | No
     for step in range(1, config.MAX_STEPS + 1):
         killswitch.check()
         if strategy == "prune":
-            pruned = context.prune_images(messages, config.PRUNE_KEEP, config.PRUNE_BATCH)
+            pruned = context.prune_images(messages, config.PRUNE_KEEP, config.PRUNE_BATCH,
+                                          protect=loaded.images)
             if pruned:
                 stats.pruned_images += pruned
                 print(f"  (오래된 스크린샷 {pruned}장 제거)")

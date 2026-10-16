@@ -37,7 +37,7 @@ import config  # noqa: E402
 from actions import backends  # noqa: E402
 from actions.assist import backend_warning  # noqa: E402
 from actions.executor import Executor  # noqa: E402
-from agent import context, loop, memory  # noqa: E402
+from agent import context, loop, memory, refs  # noqa: E402
 from benchmark.metrics import format_table, summarize  # noqa: E402
 from benchmark.tasks import TASK_SET_VERSION, CheckContext, get_tasks  # noqa: E402
 from logs.recorder import Recorder  # noqa: E402
@@ -81,6 +81,8 @@ def main() -> int:
                         help="입력 백엔드: pyautogui, directinput (기본: PC_AGENT_INPUT 환경 변수)")
     parser.add_argument("--memory", default=None,
                         help="지식 메모 파일 (기본: PC_AGENT_MEMORY 환경 변수, none이면 끔)")
+    parser.add_argument("--ref", action="append", default=None,
+                        help="참고 자료 파일. 여러 번 쓸 수 있음 (기본: PC_AGENT_REFS)")
     parser.add_argument("--list", action="store_true", help="과제 목록만 출력")
     parser.add_argument("--no-pause", action="store_true", help="과제 사이에 Enter를 기다리지 않음")
     args = parser.parse_args()
@@ -93,6 +95,8 @@ def main() -> int:
         context.resolve_strategy(config.CONTEXT, config.MODEL)  # 잘못된 값이면 여기서 ValueError
         if args.memory is not None:
             config.MEMORY_FILE = "" if args.memory.strip().lower() in ("", "none") else args.memory.strip()
+        if args.ref is not None:
+            config.REFS = [p for r in args.ref for p in refs.parse_paths(r)]
         if args.input is not None:
             config.INPUT_BACKEND = args.input.strip().lower()
         if config.INPUT_BACKEND not in backends.BACKENDS:
@@ -138,6 +142,7 @@ def main() -> int:
         "prompt_cache": config.PROMPT_CACHE,
         "input_backend": backend.name,
         "window": win.title if win else None,
+        "refs": config.REFS,
         "memory": {"file": config.MEMORY_FILE or None, "reflect": config.MEMORY_REFLECT,
                    "notes_at_start": len(memory.Memory(config.MEMORY_FILE).notes) if config.MEMORY_FILE else 0},
         "kill_key": config.KILL_KEY,

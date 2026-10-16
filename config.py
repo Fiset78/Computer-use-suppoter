@@ -94,3 +94,13 @@ MEMORY_REFLECT = os.getenv("PC_AGENT_MEMORY_REFLECT", "1") != "0"
 
 # 첫 메시지에 넣을 메모의 최대 글자 수 (넘으면 최근 메모부터)
 MEMORY_MAX_CHARS = int(os.getenv("PC_AGENT_MEMORY_MAX_CHARS", "4000"))
+
+# 참고 자료 파일 (쉼표로 구분). 첫 메시지에 넣는다. 텍스트, 이미지(png/jpg/gif/webp), PDF. 읽기 전용.
+REFS = [t.strip() for t in os.getenv("PC_AGENT_REFS", "").split(",") if t.strip()]
+
+# 참고 자료 텍스트를 모두 합친 최대 글자 수 (넘으면 뒷부분 생략)
+REFS_MAX_CHARS = int(os.getenv("PC_AGENT_REFS_MAX_CHARS", "20000"))
+
+# main.py 시작 메뉴가 보여줄 폴더: 지식 메모 파일(.md)과 참고 자료
+MEMORY_DIR = os.getenv("PC_AGENT_MEMORY_DIR", "memory")
+REFS_DIR = os.getenv("PC_AGENT_REFS_DIR", "refs")
