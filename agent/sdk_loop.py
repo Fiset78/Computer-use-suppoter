@@ -32,7 +32,7 @@ import config
 from actions import backends
 from actions.assist import TOOL_DEFS as ASSIST_TOOL_DEFS, AssistTools
 from actions.executor import Executor
-from agent import batch, usage
+from agent import batch, memory, usage
 from agent.inbox import MARKER, as_block, inbox
 from agent.loop import RunResult, build_system_prompt
 from logs.recorder import Recorder
@@ -55,6 +55,27 @@ HANDOFF_PROMPT_NOTE = """- 도구 결과 맨 앞의 [단계 n/N · 남은 단계
   남은 단계가 3 이하인데 목표를 다 끝내지 못했으면, handoff 도구로 지금까지 한 일과 다음에 할 일을 넘기세요.
   새 실행이 그 내용을 받아 이어서 합니다. handoff를 부른 뒤에는 다른 도구를 부르지 말고 한 줄로 답하고 끝내세요.
 """
+
+MEMORY_PROMPT_NOTE = """- 실행 중 어떤 방법이 실패했다가 다른 방법으로 해결했다면, 해결한 직후 remember_lesson으로 남기세요.
+  다음에 비슷한 상황에서 처음부터 그 방법을 쓸 수 있게 구체적으로 적습니다 (키 이름, delta 값, 메뉴 위치, 기다린 시간 등).
+  처음부터 문제없이 된 평범한 일은 남기지 마세요. 첫 메시지의 [이전 실행에서 배운 점]이 상황에 맞으면 그대로 따르세요.
+"""
+
+REMEMBER_TOOL_DESCRIPTION = (
+    "실행 중 겪은 문제와 그것을 해결한 방법을 교훈으로 저장합니다. 다음 실행에서 비슷한 목표를 받으면 이 교훈이 "
+    "먼저 주어집니다. 거의 같은 상황·문제의 교훈이 이미 있으면 새 해결 방법으로 고쳐 씁니다."
+)
+REMEMBER_TOOL_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "situation": {"type": "string", "description": "어떤 앱/화면에서 무엇을 하려던 상황인지 (예: 마인크래프트 게임 화면에서 시점 돌리기)"},
+        "problem": {"type": "string", "description": "무엇이 안 됐는지 (예: mouse_move로는 시점이 돌지 않음)"},
+        "solution": {"type": "string", "description": "통했던 방법, 그대로 따라 할 수 있게 구체적으로"},
+        "keywords": {"type": "array", "items": {"type": "string"}, "description": "찾을 때 쓸 단어 (앱 이름, 기능 이름 등)"},
+    },
+    "required": ["situation", "problem", "solution"],
+    "additionalProperties": False,
+}
 
 HANDOFF_TOOL_DESCRIPTION = (
     "이번 실행의 단계가 거의 다 찼을 때 작업을 다음 실행에 넘깁니다. 새 실행은 이전 화면 기록 없이 시작하므로 "
@@ -148,9 +169,13 @@ def builtin_tools(web: bool) -> list[str]:
     return list(WEB_TOOLS) if web else []
 
 
-def system_prompt(assist: AssistTools | None, web: bool, handoff: bool = False) -> str:
+def system_prompt(assist: AssistTools | None, web: bool, handoff: bool = False, remember: bool = False) -> str:
     return (build_system_prompt(assist) + SDK_PROMPT_NOTE + (HANDOFF_PROMPT_NOTE if handoff else "")
-            + (WEB_PROMPT_NOTE if web else ""))
+            + (MEMORY_PROMPT_NOTE if remember else "") + (WEB_PROMPT_NOTE if web else ""))
+
+
+def memory_file() -> Path:
+    return Path(config.MEMORY_DIR) / "lessons.json"
 
 
 def step_note(step: int, max_steps: int) -> dict:
@@ -184,7 +209,7 @@ class _Tools:
     """MCP 도구 핸들러. 긴급 정지는 결과로 숨기지 않고 abort에 담아 루프가 멈추게 한다."""
 
     def __init__(self, executor: Executor, recorder: Recorder, stats: RunResult,
-                 assist: AssistTools | None, handoff: bool = False):
+                 assist: AssistTools | None, handoff: bool = False, remember: bool = False):
         self.executor = executor
         self.recorder = recorder
         self.stats = stats
@@ -193,6 +218,8 @@ class _Tools:
         self.lock = asyncio.Lock()  # GUI 동작은 절대 겹쳐 실행하지 않는다
         self.ready_at = time.monotonic()  # 마지막 도구 결과를 돌려준 시각 (다음 응답까지가 Claude의 생각 시간)
         self.handoff_enabled = handoff
+        self.remember_enabled = remember
+        self.remembered: list[str] = []    # 이번 실행에서 저장·갱신한 교훈 id
         self.handoff: dict | None = None   # handoff 도구로 받은 {progress, next_goal}
 
     def _note(self) -> dict:
@@ -223,7 +250,23 @@ class _Tools:
             tools.append(tool(name, d["description"], d["input_schema"])(self._assist_handler(name)))
         if self.handoff_enabled:
             tools.append(tool("handoff", HANDOFF_TOOL_DESCRIPTION, HANDOFF_TOOL_SCHEMA)(self.handoff_tool))
+        if self.remember_enabled:
+            tools.append(tool("remember_lesson", REMEMBER_TOOL_DESCRIPTION, REMEMBER_TOOL_SCHEMA)(self.remember_tool))
         return tools
+
+    async def remember_tool(self, args: dict[str, Any]) -> dict:
+        path = memory_file()
+        lessons, lesson, updated = memory.add(memory.load(path), args.get("situation", ""), args.get("problem", ""),
+                                              args.get("solution", ""), args.get("keywords"))
+        try:
+            memory.save(path, lessons)
+        except OSError as err:
+            return {"content": [{"type": "text", "text": f"저장하지 못했습니다: {err}"}], "is_error": True}
+        self.remembered.append(lesson["id"])
+        verb = "고쳐 썼습니다" if updated else "새로 저장했습니다"
+        print(f"  📝 교훈 {verb}: {lesson['situation']} → {lesson['solution']}")
+        self.recorder.event("lesson", updated=updated, **{k: lesson[k] for k in ("id", "situation", "problem", "solution")})
+        return {"content": [self._note(), {"type": "text", "text": f"교훈을 {verb} (id {lesson['id']}). 하던 일을 계속하세요."}]}
 
     async def handoff_tool(self, args: dict[str, Any]) -> dict:
         self.handoff = {"progress": args.get("progress", ""), "next_goal": args.get("next_goal", "")}
@@ -288,14 +331,21 @@ class _Tools:
 async def _run(goal: str, executor: Executor, recorder: Recorder, stats: RunResult) -> RunResult:
     assist = AssistTools(executor, config.ASSIST) if config.ASSIST else None
     handoff = config.MAX_CHAIN > 1
-    handlers = _Tools(executor, recorder, stats, assist, handoff=handoff)
+    remember = config.MEMORY
+    handlers = _Tools(executor, recorder, stats, assist, handoff=handoff, remember=remember)
+    # 경험 기억: 목표와 비슷한 상황의 교훈을 골라 첫 메시지에 넣는다
+    picked = memory.pick(memory.load(memory_file()), goal) if remember else []
+    if picked:
+        print(f"  📚 이전 실행에서 배운 점 {len(picked)}개를 함께 알려 줍니다")
+        recorder.event("lessons_used", ids=[l["id"] for l in picked])
+    lessons_text = memory.as_prompt(picked)
     tools = handlers.build()
     builtins = builtin_tools(config.WEB)
     allowed = [tool_name(t.name) for t in tools] + builtins
 
     options = ClaudeAgentOptions(
         model=config.MODEL,
-        system_prompt=system_prompt(assist, config.WEB, handoff),
+        system_prompt=system_prompt(assist, config.WEB, handoff, remember),
         tools=builtins,                # 내장 도구는 웹 도구(켰을 때)만. Bash, Read, Edit 등은 항상 끔
         mcp_servers={SERVER: create_sdk_mcp_server(SERVER, tools=tools)},
         allowed_tools=allowed,
@@ -314,7 +364,8 @@ async def _run(goal: str, executor: Executor, recorder: Recorder, stats: RunResu
         yield {
             "type": "user",
             "message": {"role": "user", "content": [
-                {"type": "text", "text": f"목표: {goal}\n\n아래는 현재 화면입니다."},
+                {"type": "text", "text": f"목표: {goal}\n\n" + (f"{lessons_text}\n\n" if lessons_text else "")
+                 + "아래는 현재 화면입니다."},
                 executor.screenshot_block("initial"),
             ]},
             "parent_tool_use_id": None,
@@ -366,6 +417,13 @@ async def _run(goal: str, executor: Executor, recorder: Recorder, stats: RunResu
                 else:
                     stats.final = (msg.result or "").strip() or "(완료 보고 없음)"
                 print(f"  시간: Claude 생각 {stats.think_seconds:.1f}초 · 행동 {stats.action_seconds:.1f}초")
+                if picked and stats.status in ("done", "max_steps", "error"):
+                    # 강화: 교훈을 받은 실행이 성공했는지로 교훈의 신뢰도를 고친다 (넘김은 판단하지 않음)
+                    try:
+                        memory.save(memory_file(), memory.feedback(memory.load(memory_file()),
+                                                                   [l["id"] for l in picked], stats.status == "done"))
+                    except OSError:
+                        pass
                 recorder.event("done", step=stats.steps, status=stats.status, final=stats.final,
                                cost_usd=msg.total_cost_usd, usage=msg.usage)
         if handlers.abort is not None:

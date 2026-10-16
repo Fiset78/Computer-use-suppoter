@@ -18,6 +18,11 @@ EFFORT = os.getenv("PC_AGENT_EFFORT", "medium").strip().lower() or None
 # 최대 몇 번의 실행까지 이어 붙일지 (1이면 이어서 하기 끔). sdk 엔진 전용. 벤치마크는 항상 1.
 MAX_CHAIN = int(os.getenv("PC_AGENT_MAX_CHAIN", "5"))
 
+# 경험 기억: 실행 중 문제와 해결 방법을 교훈으로 남기고(remember_lesson), 다음 실행에 관련 교훈을 넣어 준다.
+# sdk 엔진 전용. 벤치마크는 항상 끈다 (기준 성능이 섞이지 않게). 저장: <MEMORY_DIR>/lessons.json
+MEMORY = os.getenv("PC_AGENT_MEMORY", "1") != "0"
+MEMORY_DIR = os.getenv("PC_AGENT_MEMORY_DIR", "memory")
+
 # 에이전트 루프 최대 반복 수 (무한 루프·비용 폭주 방지)
 MAX_STEPS = int(os.getenv("PC_AGENT_MAX_STEPS", "30"))
 

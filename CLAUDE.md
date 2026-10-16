@@ -9,7 +9,7 @@ Claude로 Windows PC를 조작하는 에이전트 하네스. 리서치/실험용
 - `uv sync` 후 `uv run main.py "목표"` (긴 프롬프트는 `uv run main.py -f prompts\파일.txt`, 실행 창에서는 `@prompts\파일.txt`)
 - 실행 창(터미널 없이, 음성 입력): `uv run app.py`. 바탕화면 바로가기는 `install_shortcut.ps1` (pythonw로 콘솔 없이 실행). `-Startup`이면 로그인 때 `app.py --minimized`로 자동 실행, `-RemoveStartup`으로 해제
 - sdk 엔진은 미리 `claude`를 실행해 구독 계정으로 로그인해 둔다. api 엔진은 `ANTHROPIC_API_KEY` 필요
-- 환경 변수: `PC_AGENT_ENGINE` (sdk, api), `PC_AGENT_MAX_CHAIN` (이어서 하기 최대 실행 수, 기본 5, 1이면 끔), `PC_AGENT_EFFORT` (low, medium, high: 생각 깊이, sdk 전용, 기본 medium), `PC_AGENT_WEB` (1이면 WebSearch/WebFetch 켜기, sdk 전용), `PC_AGENT_MODEL`, `PC_AGENT_MAX_STEPS`, `PC_AGENT_MAX_LONG_EDGE`, `PC_AGENT_MONITOR`, `PC_AGENT_ASSIST` (보조 도구: uia, wait, all), `PC_AGENT_CONTEXT` (server, prune, none), `PC_AGENT_INPUT` (pyautogui, directinput), `PC_AGENT_WHISPER_MODEL` (음성 인식 모델, 기본 large-v3-turbo), `PC_AGENT_HOTKEY` (실행 창 전역 단축키, 기본 ctrl+alt+space)
+- 환경 변수: `PC_AGENT_ENGINE` (sdk, api), `PC_AGENT_MEMORY` (0이면 경험 기억 끔), `PC_AGENT_MEMORY_DIR` (기본 memory), `PC_AGENT_MAX_CHAIN` (이어서 하기 최대 실행 수, 기본 5, 1이면 끔), `PC_AGENT_EFFORT` (low, medium, high: 생각 깊이, sdk 전용, 기본 medium), `PC_AGENT_WEB` (1이면 WebSearch/WebFetch 켜기, sdk 전용), `PC_AGENT_MODEL`, `PC_AGENT_MAX_STEPS`, `PC_AGENT_MAX_LONG_EDGE`, `PC_AGENT_MONITOR`, `PC_AGENT_ASSIST` (보조 도구: uia, wait, all), `PC_AGENT_CONTEXT` (server, prune, none), `PC_AGENT_INPUT` (pyautogui, directinput), `PC_AGENT_WHISPER_MODEL` (음성 인식 모델, 기본 large-v3-turbo), `PC_AGENT_HOTKEY` (실행 창 전역 단축키, 기본 ctrl+alt+space)
 - 실행 기록: `runs/<시각>/` (스크린샷 PNG + actions.jsonl)
 - 벤치마크: `uv run bench.py [--tasks a,b] [--repeat N] [--label 이름] [--assist uia,wait] [--context server|prune|none] [--input pyautogui|directinput] [--engine sdk|api] [--web on|off]` → `runs/bench-<시각>/` (results.jsonl, summary.json)
 - 테스트: `uv run pytest` (순수 모듈만)
@@ -22,6 +22,7 @@ Claude로 Windows PC를 조작하는 에이전트 하네스. 리서치/실험용
 - `agent/hidden.py`: 실행 창에서 Claude Code CLI를 띄울 때 콘솔 창이 뜨지 않게 `anyio.open_process`에 `CREATE_NO_WINDOW`를 끼워 넣음 (SDK에 옵션이 없어서)
 - `agent/usage.py`: 구독 남은 사용량 (순수). 주 출처는 Claude Code의 `get_usage` 제어 요청(`sdk_loop.fetch_usage`, SDK가 감싸지 않은 요청이라 `client._query._send_control_request` 사용, 실패하면 무시). `utilization`은 0~100. 실행 전후·창 시작·10분마다·새로고침 버튼으로 갱신. 보조로 `RateLimitEvent`도 합친다. `runs/usage.json`에 저장
 - `agent/inbox.py`: 실행 중 추가 지시함 (순수). 실행 창이 실행 도중 받은 말·입력을 넣고, sdk 엔진이 다음 도구 결과 끝에 `MARKER` 블록으로 붙여 전달한다. 실행이 끝날 때 남은 지시는 실행 창이 `follow_up_goal`로 이어서 실행. "멈춰/정지/그만"만 말하면 정지 (`is_stop_command`)
+- `agent/memory.py`: 경험 기억 (순수). 교훈 {상황, 문제, 해결, 키워드, 사용·성공·실패 횟수}를 `memory/lessons.json`에 쌓는다. sdk 엔진이 `remember_lesson` 도구로 저장(거의 같은 교훈은 갱신)하고, 실행 시작 때 목표와 관련도 × 신뢰도로 골라 첫 메시지에 넣으며, 실행 결과로 신뢰도를 고친다. `PC_AGENT_MEMORY=0`이면 끔, 벤치마크는 항상 끔
 - `agent/chain.py`: 이어서 하기. 실행 결과가 `handoff`면 `progress`/`next_goal`로 목표를 다시 만들어 새 실행을 이어 붙이고 통계를 합친다 (최대 `MAX_CHAIN`, 벤치마크는 1)
 - `prompts/`: 재사용 프롬프트 (`minecraft_controls.txt`: 마인크래프트 기본 조작 전체 확인)
 - `agent/engine.py`: 엔진 선택 (`get_runner`). 엔진별 의존성은 고를 때만 import

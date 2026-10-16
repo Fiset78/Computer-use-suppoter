@@ -176,6 +176,7 @@ class App:
         self.run_btn.pack(side="left")
         self.stop_btn = ttk.Button(row2, text="정지", command=self.stop, state="disabled")
         self.stop_btn.pack(side="left", padx=(6, 0))
+        ttk.Button(row2, text="배운 점", command=self.open_lessons).pack(side="right")
 
         row3 = ttk.Frame(frame)
         row3.grid(row=2, column=0, sticky="ew", pady=(8, 0))
@@ -464,6 +465,17 @@ class App:
             w.configure(state="disabled" if running else "normal")
         self.run_btn.configure(text="지시 보내기" if running else "실행")
         self.stop_btn.configure(state="normal" if running else "disabled")
+
+    def open_lessons(self) -> None:
+        """경험 기억 파일(교훈 목록)을 기본 편집기로 연다. 잘못된 교훈은 직접 지우거나 고쳐도 된다."""
+        path = sdk_loop.memory_file().resolve()
+        if not path.exists():
+            self.notify("아직 배운 점이 없습니다. 실행 중 문제를 해결하면 자동으로 쌓입니다.", 5)
+            return
+        try:
+            os.startfile(str(path))  # Windows 전용
+        except (AttributeError, OSError) as err:
+            self.notify(f"파일을 열지 못했습니다: {path} ({err})", 6)
 
     def send_instruction(self, text: str) -> None:
         """실행 중에 받은 지시를 추가 지시함에 넣는다. 엔진이 다음 도구 결과에 붙여 Claude에게 전달한다."""

@@ -83,6 +83,7 @@ def main() -> int:
     parser.add_argument("--no-pause", action="store_true", help="과제 사이에 Enter를 기다리지 않음")
     args = parser.parse_args()
     config.MAX_CHAIN = 1  # 벤치마크는 이어서 하기 없이 한 실행(MAX_STEPS)으로만 잰다
+    config.MEMORY = False  # 경험 기억도 끈다 (실행마다 조건이 달라지지 않게)
 
     try:
         if args.assist is not None:
