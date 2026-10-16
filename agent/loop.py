@@ -77,6 +77,29 @@ def _as_blocks(content) -> list[dict]:
     return content
 
 
+RESULT_PREVIEW_CHARS = 160
+
+
+def result_preview(content) -> str | None:
+    """터미널에 보여줄 도구 결과 한 줄. 그냥 "OK"면 None (줄만 늘어나므로).
+    이미지는 [이미지]로, 여러 줄 텍스트(UI 요소 목록 등)는 첫 줄 + 줄 수로 줄인다."""
+    parts = []
+    for block in _as_blocks(content):
+        if block.get("type") == "text":
+            text = block.get("text", "").strip()
+            lines = text.splitlines()
+            if len(lines) > 1:
+                text = f"{lines[0]} … (총 {len(lines)}줄)"
+            if text:
+                parts.append(text)
+        elif block.get("type") == "image":
+            parts.append("[이미지]")
+    line = " · ".join(parts)
+    if not line or line == "OK":
+        return None
+    return line if len(line) <= RESULT_PREVIEW_CHARS else line[:RESULT_PREVIEW_CHARS - 1] + "…"
+
+
 def process_tool_calls(response, executor: Executor, recorder: Recorder,
                        assist: AssistTools | None = None) -> list[dict]:
     """응답의 tool_use 블록을 순서대로 실행하고 tool_result 목록을 돌려준다.
@@ -113,6 +136,8 @@ def process_tool_calls(response, executor: Executor, recorder: Recorder,
                     raise NotImplementedError(f"Unknown tool: {block.name}")
                 result["content"] = handler(block.name, block.input)
                 recorder.event("action", name=block.name, input=block.input, ok=True)
+                if preview := result_preview(result["content"]):
+                    print(f"    ← {preview}")
             except Exception as err:
                 if backends.is_failsafe(err):
                     raise  # 긴급 정지는 루프 전체를 멈춘다 (Ctrl+C는 Exception이 아니라서 그대로 올라감)
@@ -193,9 +218,11 @@ def reflect(messages: list[dict], call, mem: memory.Memory, recorder: Recorder, 
                 print(f"  → {block.name} {block.input}")
                 try:
                     result["content"] = mem.run(block.name, block.input)
+                    print(f"    ← {result['content']}")
                 except Exception as err:
                     result["content"] = f"Error: {err}"
                     result["is_error"] = True
+                    print(f"  ✗ {err}")
             else:
                 result["content"] = REFLECT_NOT_EXECUTED
                 result["is_error"] = True
