@@ -10,21 +10,27 @@ from contextlib import contextmanager
 
 import pyperclip
 
-from actions.backends import InputBackend, PyAutoGuiBackend
+from actions.backends import InputBackend, PyAutoGuiBackend, StopRequested
 from actions.keys import parse_combo, parse_modifiers
+from perception import diff
 from perception.capture import Screen, to_image_block
 from safety.guard import Guard
 
 
 class Executor:
     def __init__(self, screen: Screen, guard: Guard, recorder=None, action_delay: float = 0.4,
-                 backend: InputBackend | None = None):
+                 backend: InputBackend | None = None, stop_check=None):
         self.screen = screen
         self.input = backend if backend is not None else PyAutoGuiBackend()
         self.guard = guard
         self.recorder = recorder
         self.action_delay = action_delay
         self.last_shot = None  # Claude에게 마지막으로 보낸 전체 스크린샷 (wait_for_change의 기준)
+        self.stop_check = stop_check  # 참을 돌려주면 다음 행동 전에 멈춘다 (실행 창의 정지 버튼)
+
+    def check_stop(self) -> None:
+        if self.stop_check is not None and self.stop_check():
+            raise StopRequested("사용자가 정지했습니다.")
 
     # ---------- 공통 유틸 ----------
     def _point(self, coord) -> tuple[int, int]:
@@ -64,6 +70,7 @@ class Executor:
 
     # ---------- 디스패치 ----------
     def run(self, name: str, inp: dict):
+        self.check_stop()
         handler = getattr(self, f"do_{name}", None)
         if handler is None:
             raise NotImplementedError(f"구현되지 않은 도구입니다: {name}")
@@ -120,6 +127,33 @@ class Executor:
             finally:
                 self.input.mouse_up("left")
         return "OK"
+
+    LOOK_STEP = 60   # 한 번에 보내는 상대 이동 크기 (너무 크면 일부 게임이 한 번에 받지 못함)
+    LOOK_LIMIT = 5000
+
+    LOOK_FREE_CURSOR = 25  # look 뒤 커서가 이만큼(px) 넘게 움직였으면 게임이 마우스를 잡고 있지 않은 것
+
+    def do_look(self, inp):
+        """게임 시점 돌리기: 마우스 상대 이동 신호를 잘게 나눠 보낸다.
+        게임이 마우스를 잡고 있으면 커서는 가운데에 고정돼 움직이지 않는다. 커서가 움직였다면
+        일시정지 메뉴·채팅·인벤토리가 열려 있거나 게임 창이 맨 앞이 아니라서 시점이 돌지 않은 것이다."""
+        dx, dy = (max(-self.LOOK_LIMIT, min(self.LOOK_LIMIT, int(v))) for v in inp["delta"])
+        before = self.input.position()
+        steps = max(1, -(-max(abs(dx), abs(dy)) // self.LOOK_STEP))
+        sent_x = sent_y = 0
+        for i in range(1, steps + 1):
+            tx, ty = round(dx * i / steps), round(dy * i / steps)
+            self.input.move_rel(tx - sent_x, ty - sent_y)
+            sent_x, sent_y = tx, ty
+            time.sleep(0.01)
+        time.sleep(0.05)
+        after = self.input.position()
+        moved = round(((after[0] - before[0]) ** 2 + (after[1] - before[1]) ** 2) ** 0.5)
+        if moved > self.LOOK_FREE_CURSOR:
+            return (f"주의: 시점이 돌지 않았을 가능성이 큽니다. 마우스 커서가 화면에서 {moved}px 움직였습니다 "
+                    "(게임이 마우스를 잡고 있으면 커서는 움직이지 않음). 일시정지 메뉴·채팅·인벤토리가 열려 있거나 "
+                    "게임 창이 맨 앞이 아닙니다. 게임 화면으로 돌아간 뒤 다시 look 하세요.")
+        return f"OK (시점 이동 {dx}, {dy})"
 
     def do_mouse_move(self, inp):
         self.input.move_to(*self._point(inp["coordinate"]), duration=0.1)
@@ -188,3 +222,53 @@ class Executor:
     def do_wait(self, inp):
         time.sleep(min(float(inp.get("duration", 1)), 300))
         return "OK"
+
+    # ---------- 연속 장면 / 내 PC에서 감시 ----------
+    WATCH_EDGE = 640        # watch 장면의 긴 변(px). 작게 보내 사용량을 줄인다 (장당 약 300토큰)
+    WATCH_MAX_FRAMES = 6
+
+    def do_watch(self, inp):
+        """interval초 간격으로 frames장을 작게 찍어 한꺼번에 돌려준다 (움직임·방향 파악용)."""
+        frames = max(2, min(self.WATCH_MAX_FRAMES, int(inp.get("frames", 4))))
+        interval = max(0.2, min(2.0, float(inp.get("interval", 0.5))))
+        shots = []
+        start = time.perf_counter()
+        for i in range(frames):
+            if i:
+                time.sleep(interval)
+                self.check_stop()
+            shots.append((time.perf_counter() - start, self.screen.capture()))
+        first, last = shots[0][1], shots[-1][1]
+        moved = diff.change_ratio(first, last)
+        blocks = [{"type": "text", "text": (
+            f"{interval:.1f}초 간격 장면 {frames}장 (작게 줄인 화면이라 좌표를 클릭에 쓰지 마세요. "
+            f"처음과 끝의 변화 비율 {moved:.3f})")}]
+        for t, img in shots:
+            small = img.copy()
+            small.thumbnail((self.WATCH_EDGE, self.WATCH_EDGE))
+            if self.recorder:
+                self.recorder.image(small, "watch")
+            blocks += [{"type": "text", "text": f"{t:.1f}초"}, to_image_block(small)]
+        return blocks
+
+    def do_hold_until(self, inp):
+        """키를 누른 채(또는 누르지 않고) 내 PC에서 interval초마다 화면을 비교하다가 조건이 되면 멈춘다.
+        Claude를 매번 부르지 않으므로 0.5초 단위로 반응한다."""
+        until = inp.get("until", "still")
+        max_duration = max(0.5, min(30.0, float(inp.get("max_duration", inp.get("duration", 5)))))
+        interval = max(0.2, min(2.0, float(inp.get("interval", 0.5))))
+        threshold = inp.get("threshold")
+        combo = parse_combo(inp["text"]) if inp.get("text") else []
+        if combo:
+            self.input.check_keys(combo)
+            self.guard.check_key(combo)
+
+        def grab():
+            self.check_stop()  # 정지 버튼·음성 정지가 감시 중에도 먹히게
+            return self.screen.capture()
+
+        with self._hold(combo):
+            result = diff.monitor(grab, until, max_duration, interval,
+                                  float(threshold) if threshold is not None else None)
+        held = f"{'+'.join(combo)} 키를 누른 채 " if combo else ""
+        return f"OK: {held}{result.describe(until)}"

@@ -1,8 +1,27 @@
 """전역 설정. 환경 변수로 덮어쓸 수 있다."""
 import os
 
+# 에이전트 엔진: sdk | api
+#   sdk = Claude Agent SDK (Claude Code CLI + 구독 로그인, API 키 불필요). 기본값
+#   api = Anthropic Messages API 직접 호출 (computer_toolset_20260801, ANTHROPIC_API_KEY 필요)
+ENGINES = ("sdk", "api")
+ENGINE = os.getenv("PC_AGENT_ENGINE", "sdk").strip().lower()
+
 # 사용할 모델 (computer_toolset_20260801 지원 모델: Sonnet 5, Opus 5 / 5.5 등)
 MODEL = os.getenv("PC_AGENT_MODEL", "claude-sonnet-5")
+
+# Claude가 단계마다 얼마나 깊이 생각할지: low | medium | high | xhigh | max (sdk 엔진).
+# 낮을수록 빠르지만 어려운 작업은 실수가 늘 수 있다. 비우면 모델 기본값(보통 high).
+EFFORT = os.getenv("PC_AGENT_EFFORT", "medium").strip().lower() or None
+
+# 이어서 하기: 한 실행(최대 MAX_STEPS 단계) 안에 끝나지 않으면 Claude가 handoff 도구로 다음 실행에 넘긴다.
+# 최대 몇 번의 실행까지 이어 붙일지 (1이면 이어서 하기 끔). sdk 엔진 전용. 벤치마크는 항상 1.
+MAX_CHAIN = int(os.getenv("PC_AGENT_MAX_CHAIN", "5"))
+
+# 경험 기억: 실행 중 문제와 해결 방법을 교훈으로 남기고(remember_lesson), 다음 실행에 관련 교훈을 넣어 준다.
+# sdk 엔진 전용. 벤치마크는 항상 끈다 (기준 성능이 섞이지 않게). 저장: <MEMORY_DIR>/lessons.json
+MEMORY = os.getenv("PC_AGENT_MEMORY", "1") != "0"
+MEMORY_DIR = os.getenv("PC_AGENT_MEMORY_DIR", "memory")
 
 # 에이전트 루프 최대 반복 수 (무한 루프·비용 폭주 방지)
 MAX_STEPS = int(os.getenv("PC_AGENT_MAX_STEPS", "30"))
@@ -46,6 +65,10 @@ def parse_assist(text: str | None) -> list[str]:
 
 ASSIST = parse_assist(os.getenv("PC_AGENT_ASSIST"))
 
+# Claude Code 내장 웹 도구(WebSearch, WebFetch)를 켤지 여부. sdk 엔진 전용.
+# 켜면 브라우저를 조작하지 않고 텍스트로 검색할 수 있다. 순수 화면 조작 성능을 잴 때는 끈다 (기본 꺼짐).
+WEB = os.getenv("PC_AGENT_WEB", "0").strip().lower() in ("1", "true", "yes", "on")
+
 # 컨텍스트 관리 전략 (로드맵 6단계): server | prune | none
 #   server = 서버 측 tool result clearing (권장, 모든 모델에서 안전)
 #   prune  = 클라이언트 측 스크린샷 가지치기 (Opus 5.5 / Fable 5.1에서는 자동으로 server로 바뀜)
@@ -64,6 +87,12 @@ CLEAR_AT_LEAST = int(os.getenv("PC_AGENT_CLEAR_AT_LEAST", "10000"))
 # prune: 스크린샷이 PRUNE_KEEP + PRUNE_BATCH장을 넘으면 최근 PRUNE_KEEP장만 남긴다.
 PRUNE_KEEP = int(os.getenv("PC_AGENT_PRUNE_KEEP", "3"))
 PRUNE_BATCH = int(os.getenv("PC_AGENT_PRUNE_BATCH", "10"))
+
+# 실행 창의 음성 입력 전역 단축키. 누르면 말하기 시작/멈추기, 실행 중에 누르면 정지
+HOTKEY = os.getenv("PC_AGENT_HOTKEY", "ctrl+alt+space")
+# 직접 정하지 않았을 때, 기본 단축키를 다른 프로그램이 쓰고 있으면 차례로 시도할 단축키
+HOTKEY_FALLBACKS = ("ctrl+alt+f9", "ctrl+shift+f9", "ctrl+alt+f12")
+HOTKEY_FROM_ENV = bool(os.getenv("PC_AGENT_HOTKEY"))
 
 # 입력 백엔드 (로드맵 7단계): pyautogui (일반 앱, 기본) | directinput (게임, pydirectinput-rgx)
 INPUT_BACKEND = os.getenv("PC_AGENT_INPUT", "pyautogui").strip().lower()

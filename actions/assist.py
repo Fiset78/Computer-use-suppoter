@@ -122,6 +122,7 @@ class AssistTools:
     def run(self, name: str, inp: dict):
         if not self.has(name):
             raise NotImplementedError(f"켜지지 않은 보조 도구입니다: {name}")
+        self.executor.check_stop()
         return getattr(self, f"do_{name}")(inp)
 
     # ---------- uia ----------

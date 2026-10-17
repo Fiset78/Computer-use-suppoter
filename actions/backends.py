@@ -7,12 +7,17 @@
 Executor와 보조 도구는 이 인터페이스로만 입력을 보낸다. 키 이름은 pyautogui 기준(actions/keys.py)이고,
 백엔드가 모르는 키는 조용히 무시하지 않고 ValueError로 거부한다 (두 라이브러리 모두 기본은 무시).
 """
+import ctypes
 import sys
 
 # 긴급 정지 예외 클래스들. 백엔드를 만들 때 등록한다.
 _FAILSAFE_ERRORS: list[type] = []
 
 BACKENDS = ("pyautogui", "directinput")
+
+
+class StopRequested(Exception):
+    """사용자가 창의 정지 버튼을 눌렀다. 긴급 정지와 같은 경로로 실행 전체를 멈춘다."""
 
 
 def is_failsafe(err: BaseException) -> bool:
@@ -23,6 +28,9 @@ def is_failsafe(err: BaseException) -> bool:
 def _register_failsafe(exc: type) -> None:
     if exc not in _FAILSAFE_ERRORS:
         _FAILSAFE_ERRORS.append(exc)
+
+
+_register_failsafe(StopRequested)
 
 
 class InputBackend:
@@ -54,6 +62,33 @@ class InputBackend:
             raise ValueError(f"입력 백엔드 '{self.name}'가 지원하지 않는 키입니다: {', '.join(bad)}")
 
 
+class _MOUSEINPUT(ctypes.Structure):
+    # Windows 크기 그대로 고정 (LONG/DWORD = 4바이트, ULONG_PTR = 포인터 크기)
+    _fields_ = [("dx", ctypes.c_int32), ("dy", ctypes.c_int32), ("mouseData", ctypes.c_uint32),
+                ("dwFlags", ctypes.c_uint32), ("time", ctypes.c_uint32), ("dwExtraInfo", ctypes.c_size_t)]
+
+
+class _INPUT(ctypes.Structure):
+    _fields_ = [("type", ctypes.c_uint32), ("mi", _MOUSEINPUT)]  # MOUSEINPUT이 union 중 가장 크다
+
+
+def send_relative_mouse(dx: int, dy: int) -> bool:
+    """마우스 장치가 움직인 것과 같은 상대 이동 신호를 보낸다 (Windows SendInput, MOUSEEVENTF_MOVE).
+
+    마인크래프트처럼 커서를 화면 가운데 고정하고 raw input만 읽는 게임은 '커서를 좌표로 옮기기'
+    (SetCursorPos, pyautogui.moveRel)에는 반응하지 않고 이 신호에만 시점이 돈다.
+    Windows가 아니면 False를 돌려주고 아무것도 하지 않는다."""
+    if sys.platform != "win32":
+        return False
+    import ctypes
+
+    inp = _INPUT(type=0, mi=_MOUSEINPUT(dx=int(dx), dy=int(dy), mouseData=0, dwFlags=0x0001, time=0, dwExtraInfo=0))
+    sent = ctypes.windll.user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(_INPUT))
+    if sent != 1:
+        raise OSError(f"SendInput 실패 (오류 {ctypes.get_last_error()})")
+    return True
+
+
 class PyAutoGuiBackend(InputBackend):
     name = "pyautogui"
 
@@ -74,6 +109,10 @@ class PyAutoGuiBackend(InputBackend):
         self._p.moveTo(x, y, duration=duration)
 
     def move_rel(self, dx, dy):
+        # 게임 시점 돌리기가 되도록 실제 마우스와 같은 상대 이동 신호를 보낸다
+        if send_relative_mouse(dx, dy):
+            self._p.failSafeCheck()  # 커서가 왼쪽 위 모서리에 닿았으면 긴급 정지
+            return
         self._p.moveRel(dx, dy)
 
     def mouse_down(self, button="left"):
@@ -126,7 +165,8 @@ class DirectInputBackend(InputBackend):
         self._d.moveTo(x, y, duration=duration)
 
     def move_rel(self, dx, dy):
-        self._d.moveRel(dx, dy, relative=True)
+        if not send_relative_mouse(dx, dy):  # 두 백엔드가 같은 방식으로 시점을 돌리게 한다
+            self._d.moveRel(dx, dy, relative=True)
 
     def mouse_down(self, button="left"):
         self._d.mouseDown(button=button)

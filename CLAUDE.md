@@ -1,19 +1,34 @@
 # pc-agent
 
-Claude API의 computer use(`computer_toolset_20260801`)를 직접 구동하는 Windows용 에이전트 하네스. 리서치/실험용.
+Claude로 Windows PC를 조작하는 에이전트 하네스. 리서치/실험용. 엔진 두 가지:
+- `sdk` (기본): Claude Agent SDK + Claude Code 구독 로그인. API 키 불필요. custom 도구 `computer`(행동 배열)를 in-process MCP로 제공
+- `api`: Messages API의 computer use(`computer_toolset_20260801`)를 직접 구동. `ANTHROPIC_API_KEY` 필요
 최종 목표: 순수 computer use 기준 성능을 먼저 측정한 뒤, 보조 기능(UIA 요소 트리, 화면 변화 감지 등)을 붙여 개선 폭을 비교한다. 이후 마인크래프트 에이전트로 확장할 예정이다.
 
 ## 실행
-- `uv sync` 후 `uv run main.py "목표"`
-- 환경 변수: `ANTHROPIC_API_KEY` (필수), `PC_AGENT_MODEL`, `PC_AGENT_MAX_STEPS`, `PC_AGENT_MAX_LONG_EDGE`, `PC_AGENT_MONITOR`, `PC_AGENT_ASSIST` (보조 도구: uia, wait, all), `PC_AGENT_CONTEXT` (server, prune, none), `PC_AGENT_INPUT` (pyautogui, directinput)
+- `uv sync` 후 `uv run main.py "목표"` (긴 프롬프트는 `uv run main.py -f prompts\파일.txt`, 실행 창에서는 `@prompts\파일.txt`)
+- 실행 창(터미널 없이, 음성 입력): `uv run app.py`. 바탕화면 바로가기는 `install_shortcut.ps1` (pythonw로 콘솔 없이 실행). `-Startup`이면 로그인 때 `app.py --minimized`로 자동 실행, `-RemoveStartup`으로 해제
+- sdk 엔진은 미리 `claude`를 실행해 구독 계정으로 로그인해 둔다. api 엔진은 `ANTHROPIC_API_KEY` 필요
+- 환경 변수: `PC_AGENT_ENGINE` (sdk, api), `PC_AGENT_MEMORY` (0이면 경험 기억 끔), `PC_AGENT_MEMORY_DIR` (기본 memory), `PC_AGENT_MAX_CHAIN` (이어서 하기 최대 실행 수, 기본 5, 1이면 끔), `PC_AGENT_EFFORT` (low, medium, high: 생각 깊이, sdk 전용, 기본 medium), `PC_AGENT_WEB` (1이면 WebSearch/WebFetch 켜기, sdk 전용), `PC_AGENT_MODEL`, `PC_AGENT_MAX_STEPS`, `PC_AGENT_MAX_LONG_EDGE`, `PC_AGENT_MONITOR`, `PC_AGENT_ASSIST` (보조 도구: uia, wait, all), `PC_AGENT_CONTEXT` (server, prune, none), `PC_AGENT_INPUT` (pyautogui, directinput), `PC_AGENT_WHISPER_MODEL` (음성 인식 모델, 기본 large-v3-turbo), `PC_AGENT_HOTKEY` (실행 창 전역 단축키, 기본 ctrl+alt+space)
 - 실행 기록: `runs/<시각>/` (스크린샷 PNG + actions.jsonl)
-- 벤치마크: `uv run bench.py [--tasks a,b] [--repeat N] [--label 이름] [--assist uia,wait] [--context server|prune|none] [--input pyautogui|directinput]` → `runs/bench-<시각>/` (results.jsonl, summary.json)
+- 벤치마크: `uv run bench.py [--tasks a,b] [--repeat N] [--label 이름] [--assist uia,wait] [--context server|prune|none] [--input pyautogui|directinput] [--engine sdk|api] [--web on|off]` → `runs/bench-<시각>/` (results.jsonl, summary.json)
 - 테스트: `uv run pytest` (순수 모듈만)
 
 ## 구조
 - `main.py`: 진입점. DPI 설정을 가장 먼저 호출한다 (pyautogui import 전)
+- `app.py`: 실행 창 (tkinter). 창은 최소화 상태를 유지하고(단축키·실행·대화상자 모두 창을 띄우지 않음) 상태는 화면 구석 알림(`Overlay`, 에이전트 실행 중에는 숨김)으로 보여 준다. 정지 버튼(`Executor.stop_check` → `StopRequested`), 위험 행동 확인 대화상자(`Guard(ask=)`), print를 창으로 돌림
+- `voice/stt.py`: 마이크 녹음(sounddevice) + 음성 인식(faster-whisper, 로컬). `voice/text.py`: 인식 결과 정리, 단어 힌트(initial_prompt, 기본 단어 + `voice_words.txt`), 음량 맞추기 (순수). `voice/endpoint.py`: 말 끝 감지 (소음 측정 → 말 시작 → 2초 무음이면 종료, 순수). `voice/tts.py`: 결과 읽어 주기 (Windows System.Speech). `voice/hotkey.py`: 전역 단축키 (Win32 RegisterHotKey, ctypes. 새 DLL을 들이지 않으려고 라이브러리를 쓰지 않음)
 - `bench.py`: 벤치마크 진입점. 과제 반복 실행, 자동/수동 판정, 결과 저장
-- `agent/loop.py`: 에이전트 루프, 시스템 프롬프트, 배치 처리. `run()`은 `RunResult`(상태, 단계, 행동, 토큰, 캐시 토큰)를 반환
+- `agent/hidden.py`: 실행 창에서 Claude Code CLI를 띄울 때 콘솔 창이 뜨지 않게 `anyio.open_process`에 `CREATE_NO_WINDOW`를 끼워 넣음 (SDK에 옵션이 없어서)
+- `agent/usage.py`: 구독 남은 사용량 (순수). 주 출처는 Claude Code의 `get_usage` 제어 요청(`sdk_loop.fetch_usage`, SDK가 감싸지 않은 요청이라 `client._query._send_control_request` 사용, 실패하면 무시). `utilization`은 0~100. 실행 전후·창 시작·10분마다·새로고침 버튼으로 갱신. 보조로 `RateLimitEvent`도 합친다. `runs/usage.json`에 저장
+- `agent/inbox.py`: 실행 중 추가 지시함 (순수). 실행 창이 실행 도중 받은 말·입력을 넣고, sdk 엔진이 다음 도구 결과 끝에 `MARKER` 블록으로 붙여 전달한다. 실행이 끝날 때 남은 지시는 실행 창이 `follow_up_goal`로 이어서 실행. "멈춰/정지/그만"만 말하면 정지 (`is_stop_command`)
+- `agent/memory.py`: 경험 기억 (순수). 교훈 {상황, 문제, 해결, 키워드, 사용·성공·실패 횟수}를 `memory/lessons.json`에 쌓는다. sdk 엔진이 `remember_lesson` 도구로 저장(거의 같은 교훈은 갱신)하고, 실행 시작 때 목표와 관련도 × 신뢰도로 골라 첫 메시지에 넣으며, 실행 결과로 신뢰도를 고친다. `PC_AGENT_MEMORY=0`이면 끔, 벤치마크는 항상 끔
+- `agent/chain.py`: 이어서 하기. 실행 결과가 `handoff`면 `progress`/`next_goal`로 목표를 다시 만들어 새 실행을 이어 붙이고 통계를 합친다 (최대 `MAX_CHAIN`, 벤치마크는 1)
+- `prompts/`: 재사용 프롬프트 (`minecraft_controls.txt`: 마인크래프트 기본 조작 전체 확인)
+- `agent/engine.py`: 엔진 선택 (`get_runner`). 엔진별 의존성은 고를 때만 import
+- `agent/sdk_loop.py`: sdk 엔진. MCP 도구 등록, ClaudeSDKClient 실행, ResultMessage → `RunResult` (단계별 생각/행동 시간도 잰다: `think_seconds`, `action_seconds`)
+- `agent/batch.py`: sdk 엔진의 `computer` 도구 스키마와 배치 실행 규칙 (순수 모듈)
+- `agent/loop.py`: api 엔진 에이전트 루프, 시스템 프롬프트, 배치 처리. `run()`은 `RunResult`(상태, 단계, 행동, 토큰, 캐시 토큰)를 반환
 - `agent/context.py`: 컨텍스트 관리 (캐시 중단점, 서버 측 clearing 설정, 클라이언트 가지치기). 순수 모듈
 - `benchmark/tasks.py`: 고정 과제 세트 (setup/check). 과제를 바꾸면 `TASK_SET_VERSION`을 올린다
 - `benchmark/metrics.py`: 결과 집계와 표 출력 (순수 모듈)
@@ -25,9 +40,19 @@ Claude API의 computer use(`computer_toolset_20260801`)를 직접 구동하는 W
 - `perception/elements.py`, `perception/diff.py`: 요소 목록 형식, 화면 변화 판정 (순수 모듈)
 - `actions/keys.py`: xdotool 스타일 키 이름 → pyautogui 키 이름 (순수 함수)
 - `safety/guard.py`: 위험 키/텍스트 입력 전 y/n 확인
-- `logs/recorder.py`: 실행 기록
+- `logs/recorder.py`: 실행 기록. 스크린샷 PNG는 뒤 스레드에서 저장 (close()에서 다 저장될 때까지 기다림)
 
-## computer_toolset_20260801 규칙 (어기면 API가 요청을 거부함)
+## sdk 엔진 규칙
+- 내장 도구는 기본적으로 `tools=[]`로 전부 끈다. `PC_AGENT_WEB=1`일 때만 `WebSearch`, `WebFetch`를 켠다 (Bash/Read 등 파일·셸 도구는 절대 켜지 않음). `allowed_tools`에는 우리 MCP 도구(`mcp__pc__*`)와 켜진 웹 도구만 넣고 `permission_mode="dontAsk"`
+- `setting_sources=[]`로 사용자/프로젝트 설정과 CLAUDE.md를 읽지 않는다 (실험 격리)
+- `env={"ANTHROPIC_API_KEY": ""}`로 API 키를 CLI에 넘기지 않는다 (구독 로그인 사용)
+- `computer` 도구는 첫 실패 이후 행동을 실행하지 않고, 관찰 행동으로 끝나지 않은 배치에 스크린샷을 붙인다 (api 엔진과 같은 규칙)
+- 긴급 정지는 도구 결과로 숨기지 않고 `_Tools.abort`에 담아 루프가 interrupt 후 다시 올린다
+- MCP 이미지 형식은 `{"type": "image", "data", "mimeType"}` (`batch.to_mcp_content`로 변환)
+- 도구 결과 맨 앞에 `[단계 n/N · 남은 단계 k]`를 붙인다. `MAX_CHAIN > 1`이면 `handoff` 도구를 함께 등록해, 단계가 거의 찼을 때 Claude가 다음 실행에 작업을 넘긴다
+- `computer` 도구에는 툴셋 17개 외에 게임용 `look`(delta [dx, dy] 마우스 상대 이동)이 있다. 커서가 고정된 게임의 시점 돌리기용. 추가로 `watch`(interval 간격 연속 장면 frames장, 긴 변 640px로 축소, 좌표 클릭 금지)와 `hold_until`(키를 누른 채 `diff.monitor`로 interval마다 화면 비교, until=still/change 또는 max_duration에서 멈춤, 정지 확인 포함)이 있다. 두 백엔드 모두 `backends.send_relative_mouse`(SendInput 상대 이동 = raw input에 잡힘)로 보낸다. look 전후 커서가 움직였으면 게임이 마우스를 잡지 않은 상태(메뉴·포커스 없음)라고 결과에 알린다. 마인크래프트 기본 감도에서 delta 600 ≈ 90도
+
+## computer_toolset_20260801 규칙 (api 엔진) (어기면 API가 요청을 거부함)
 - beta 헤더 없음. `client.messages.create`의 `tools=[{"type": "computer_toolset_20260801"}]`
 - `name`, `display_width_px`, `display_height_px`, `display_number`, `enable_zoom`은 넣으면 안 됨
 - 응답의 tool_use 블록은 `name`이 멤버 이름(left_click 등), `toolset_name == "computer"`, `input`에 `action` 필드 없음
@@ -39,7 +64,7 @@ Claude API의 computer use(`computer_toolset_20260801`)를 직접 구동하는 W
 - 좌표는 항상 우리가 보낸 스크린샷의 픽셀 좌표. 스크린샷은 직접 축소해서 보내야 함 (API가 줄여주지 않음)
 - 문서: https://platform.claude.com/docs/en/agents-and-tools/tool-use/computer-use-tool
 
-## 컨텍스트 관리 규칙
+## 컨텍스트 관리 규칙 (api 엔진. sdk 엔진은 Claude Code가 관리)
 - `system`과 `tools`는 실행 중에 절대 바꾸지 않는다 (캐시와 preserved thinking이 모두 깨짐)
 - 캐시 중단점은 요청 직전 사본에만 붙인다 (`with_cache_breakpoints`). 최대 4개: system 1 + 최근 user 메시지 3
 - 서버 측 clearing: `client.beta.messages.create(betas=["context-management-2025-06-27"], context_management={"edits": [clear_tool_uses_20250919]})`. 대화 기록 자체는 바뀌지 않으므로 모든 모델에서 안전
@@ -56,6 +81,6 @@ Claude API의 computer use(`computer_toolset_20260801`)를 직접 구동하는 W
 
 ## 규칙
 - 마우스/키보드 입력은 반드시 `executor.input`(입력 백엔드)을 통한다. 새 코드에서 pyautogui/pydirectinput를 직접 부르지 않는다
-- 긴급 정지는 `backends.is_failsafe(err)`로 판정한다 (백엔드마다 예외 클래스가 다름)
+- 긴급 정지는 `backends.is_failsafe(err)`로 판정한다 (백엔드마다 예외 클래스가 다름). 실행 창의 정지 버튼(`StopRequested`)도 같은 경로로 처리된다
 - 이 코드는 Windows에서만 실제로 동작한다. Linux/CI에서는 순수 모듈과, `tests/conftest.py`의 가짜 `pyautogui`로 루프 로직만 테스트한다 (`uv run pytest`).
 - 사용자 메시지/주석/로그는 한국어로 작성한다.

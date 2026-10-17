@@ -192,3 +192,11 @@ def test_cursor_position_uses_backend(monkeypatch):
     b.position = lambda: (200, 100)
     ex.screen.to_shot = lambda x, y: (x // 2, y // 2)
     assert ex.run("cursor_position", {}) == "X=100, Y=50"
+
+
+def test_sendinput_struct_matches_windows_x64():
+    import ctypes
+
+    from actions.backends import _INPUT, _MOUSEINPUT
+    if ctypes.sizeof(ctypes.c_void_p) == 8:   # 64비트 Windows의 INPUT은 40바이트
+        assert ctypes.sizeof(_MOUSEINPUT) == 32 and ctypes.sizeof(_INPUT) == 40
