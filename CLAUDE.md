@@ -4,21 +4,20 @@ Claude API의 computer use(`computer_toolset_20260801`)를 직접 구동하는 W
 최종 목표: 순수 computer use 기준 성능을 먼저 측정한 뒤, 보조 기능(UIA 요소 트리, 화면 변화 감지 등)을 붙여 개선 폭을 비교한다. 이후 마인크래프트 에이전트로 확장할 예정이다.
 
 ## 실행
-- `uv sync` 후 `uv run main.py [--profile 이름] [--memory 파일] [--ref 파일 ...] [--pick|--no-pick] "목표"` (시작 메뉴: 프로필 → 메모 → 참고 자료)
+- `uv sync` 후 `uv run main.py [--profile 이름] [--memory 파일] [--ref 파일 ...] [--pick|--no-pick] [--gui|--no-gui] "목표"` (시작 메뉴: 프로필 → 메모 → 참고 자료). 목표 없이 실행하면 시작 창(`agent/gui.py`)에서 전부 고름
 - 프로필: `profiles/<이름>.toml` (mode = desktop | game). 새 프로필은 `uv run main.py --new-profile 이름 --mode game --window 창제목`
 - 환경 변수: `ANTHROPIC_API_KEY` (필수), `PC_AGENT_MODEL`, `PC_AGENT_MAX_STEPS`, `PC_AGENT_MAX_LONG_EDGE`, `PC_AGENT_MONITOR`, `PC_AGENT_ASSIST` (보조 도구: uia, wait, game, minecraft, all), `PC_AGENT_CONTEXT` (server, prune, none), `PC_AGENT_INPUT` (pyautogui, directinput), `PC_AGENT_WINDOW` (이 제목의 창만 캡처/조작), `PC_AGENT_MEMORY` (지식 메모 파일), `PC_AGENT_REFS` (참고 자료, 쉼표 구분), `PC_AGENT_KILL_KEY` (기본 f12), `PC_AGENT_CLICK_SETTLE`/`_HOLD` (게임 클릭 타이밍), `PC_AGENT_GAME_FOV`, `PC_AGENT_GAME_COUNTS_PER_DEG`
 - 실행 기록: `runs/<시각>/` (스크린샷 PNG + actions.jsonl)
-- 프로필 고르기 창: `uv run launcher.py` (tkinter, 고른 프로필로 새 콘솔에서 main.py 실행)
 - 벤치마크: `uv run bench.py [--tasks a,b] [--repeat N] [--label 이름] [--assist uia,wait] [--context server|prune|none] [--input pyautogui|directinput]` → `runs/bench-<시각>/` (results.jsonl, summary.json)
 - 테스트: `uv run pytest` (순수 모듈만)
 
 ## 구조
 - `main.py`: 진입점. DPI 설정을 가장 먼저 호출한다 (pyautogui import 전)
-- `launcher.py`: 프로필 고르기 창 (tkinter). 목록/상세 보기/실행 명령은 순수 함수, 실행은 `--child`로 새 콘솔에서 main.py를 돌림
 - `bench.py`: 벤치마크 진입점. 과제 반복 실행, 자동/수동 판정, 결과 저장
 - `agent/loop.py`: 에이전트 루프, 시스템 프롬프트, 배치 처리. `run()`은 `RunResult`(상태, 단계, 행동, 토큰, 캐시 토큰)를 반환
 - `agent/profiles.py`: 프로필 불러오기·검증·config 적용, 새 프로필 템플릿, 시작 메뉴. mode가 시스템 프롬프트(`loop.BASE_PROMPTS`)를 정함
 - `agent/memory.py`: 지식 메모 (remember/forget 도구, Markdown 파일, 첫 메시지 주입 문구). 작업 후 정리는 `loop.reflect`
+- `agent/gui.py`: 시작 창 (tkinter, `choose()` 안에서만 import). 프로필·메모·참고 자료·목표를 한 화면에서 고름. 목록/상세 보기/기본값 계산은 순수 함수
 - `agent/refs.py`: 참고 자료 → content 블록(텍스트/이미지/PDF), 시작 메뉴 `pick()` (input/print 주입, 순수 로직)
 - `agent/context.py`: 컨텍스트 관리 (캐시 중단점, 서버 측 clearing 설정, 클라이언트 가지치기). 순수 모듈
 - `benchmark/tasks.py`: 고정 과제 세트 (setup/check). 과제를 바꾸면 `TASK_SET_VERSION`을 올린다
