@@ -58,6 +58,8 @@ powershell -ExecutionPolicy Bypass -File install_shortcut.ps1
   알아들은 문장을 2초 보여 준 뒤 자동으로 실행합니다. 그 2초 안에 Esc나 단축키를 누르면 취소됩니다.
   녹음 중에 단축키를 누르면 바로 멈추고, 실행 중에 누르면 정지합니다. 두 자동 기능은 창의 체크 상자로 끌 수 있습니다. Ctrl+Alt+Space를 다른 프로그램이 쓰고 있으면 Ctrl+Alt+F9 → Ctrl+Shift+F9 → Ctrl+Alt+F12 순서로 자동으로 바꾸고, 창 아래쪽에 실제 단축키를 보여 줍니다. 직접 정하려면 `PC_AGENT_HOTKEY` (예: `ctrl+shift+f10`). 실행 창은 하나만 켜집니다.
 - 처음 말할 때 음성 인식 모델 `large-v3-turbo`(약 1.6GB)를 내려받습니다. 인식이 느리면 `PC_AGENT_WHISPER_MODEL`을 `medium`이나 `small`로 낮추세요.
+- **📂 파일**: 긴 목표를 적어 둔 텍스트 파일(`.txt`, `.md`)을 골라 입력칸에 `@경로`로 넣습니다. **실행**을 누르면 파일 내용이 목표가 되고,
+  실행 중에 고르고 **지시 보내기**를 누르면 내용이 추가 지시로 전달됩니다. 입력칸에 `@prompts\파일.txt`를 직접 써도 같습니다.
 - 자주 틀리는 단어(프로그램 이름 등)는 프로젝트 폴더의 `voice_words.txt`에 적어 두면 그 단어로 맞춰 듣습니다. 저장하면 다음 인식부터 반영됩니다.
 - 실행 중에는 창이 최소화되고, 끝나도 최소화된 채로 있습니다. 창이 최소화돼 있으면 듣는 중·알아들은 문장·2초 카운트다운·결과를
   화면 오른쪽 아래 작은 알림으로 보여 줍니다 (에이전트가 화면을 보는 동안에는 알림을 숨김). 멈추려면 단축키를 누르거나,
@@ -114,7 +116,7 @@ Claude가 한 번 판단하는 데는 몇 초가 걸려서 0.5초마다 다시 �
 $env:PC_AGENT_INPUT = "directinput"   # 게임 입력 권장 (시점 돌리기 look은 두 입력 방식 모두에서 동작)
 uv run main.py -f prompts\minecraft_controls.txt
 ```
-실행 창에서는 입력칸에 `@prompts\minecraft_controls.txt`를 넣고 실행합니다.
+실행 창에서는 **📂 파일**로 `prompts\minecraft_controls.txt`를 고르거나 입력칸에 `@prompts\minecraft_controls.txt`를 넣고 실행합니다.
 
 ## 긴급 정지
 - 마우스를 **화면 왼쪽 위 모서리**로 급히 옮기면 즉시 멈춥니다.

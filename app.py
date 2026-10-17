@@ -26,7 +26,7 @@ from perception.capture import enable_dpi_awareness
 enable_dpi_awareness()
 
 import tkinter as tk  # noqa: E402
-from tkinter import messagebox, scrolledtext, ttk  # noqa: E402
+from tkinter import filedialog, messagebox, scrolledtext, ttk  # noqa: E402
 
 import config  # noqa: E402
 from actions import backends  # noqa: E402
@@ -171,6 +171,7 @@ class App:
         root.bind("<Escape>", lambda e: self.cancel_countdown("취소했습니다."))
         self.mic_btn = ttk.Button(row, text="🎤 말하기", command=self.toggle_mic, width=12)
         self.mic_btn.grid(row=0, column=1, padx=(8, 0))
+        ttk.Button(row, text="📂 파일", command=self.pick_file, width=8).grid(row=0, column=2, padx=(6, 0))
 
         row2 = ttk.Frame(frame)
         row2.grid(row=1, column=0, sticky="ew", pady=(10, 0))
@@ -483,6 +484,34 @@ class App:
         except (AttributeError, OSError) as err:
             self.notify(f"파일을 열지 못했습니다: {path} ({err})", 6)
 
+    def pick_file(self) -> None:
+        """목표(프롬프트) 파일을 골라 입력칸에 '@경로'로 넣는다. 실행을 누르면 파일 내용이 목표가 된다."""
+        self.cancel_countdown()
+        start = Path("prompts") if Path("prompts").is_dir() else Path.cwd()
+        name = filedialog.askopenfilename(
+            parent=self.root, title="목표 파일 고르기", initialdir=str(start.resolve()),
+            filetypes=[("텍스트 파일", "*.txt *.md"), ("모든 파일", "*.*")])
+        if not name:
+            return
+        path = Path(name)
+        try:
+            path = path.resolve().relative_to(Path.cwd().resolve())  # 프로젝트 안이면 짧게 보여 준다
+        except ValueError:
+            pass
+        self.goal.set(f"@{path}")
+        self.entry.icursor("end")
+        self.status.set(f"파일을 골랐습니다: {path.name} ({'지시 보내기' if self.running else '실행'}를 누르면 내용을 보냅니다)")
+
+    def read_goal_file(self, text: str) -> str | None:
+        """'@경로'면 파일 내용을, 아니면 그대로 돌려준다. 읽지 못하면 알리고 None."""
+        if not text.startswith("@"):
+            return text
+        try:
+            return Path(text[1:].strip().strip('"')).read_text(encoding="utf-8-sig").strip()
+        except (OSError, UnicodeDecodeError) as err:
+            self.notify(f"목표 파일을 읽지 못했습니다: {err}", 6)
+            return None
+
     def send_instruction(self, text: str) -> None:
         """실행 중에 받은 지시를 추가 지시함에 넣는다. 엔진이 다음 도구 결과에 붙여 Claude에게 전달한다."""
         inbox.put(text)
@@ -499,15 +528,14 @@ class App:
                 if is_stop_command(goal):
                     self.stop()
                 else:
-                    self.send_instruction(goal)
+                    text = self.read_goal_file(goal)  # 실행 중에도 파일 내용을 추가 지시로 보낼 수 있다
+                    if text:
+                        self.send_instruction(text)
             return
-        if goal.startswith("@"):
-            # 긴 프롬프트는 파일로: @prompts\minecraft_controls.txt
-            try:
-                goal = Path(goal[1:].strip()).read_text(encoding="utf-8-sig").strip()
-            except OSError as err:
-                self.notify(f"목표 파일을 읽지 못했습니다: {err}", 6)
-                return
+        # 긴 프롬프트는 파일로: @prompts\minecraft_controls.txt (📂 파일 버튼으로 골라도 된다)
+        goal = self.read_goal_file(goal)
+        if goal is None:
+            return
         if self.mic.recording:
             return
         if not goal:
