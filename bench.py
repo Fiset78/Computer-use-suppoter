@@ -11,15 +11,13 @@
     uv run bench.py --assist uia,wait     # 보조 도구를 켜고 측정 (기본: 끔 = 순수 computer use)
     uv run bench.py --context prune       # 컨텍스트 관리 전략 (server | prune | none)
     uv run bench.py --input directinput   # 입력 백엔드 (pyautogui | directinput)
-    uv run bench.py --profile desktop     # 프로필 적용 (그 뒤에 주는 옵션이 프로필보다 우선)
-    uv run bench.py --memory memory/desk.md  # 지식 메모를 켜고 측정 (실행마다 메모가 쌓여 다음 실행에 쓰임)
 
 결과: runs/bench-<시각>[-label]/
     results.jsonl   실행마다 한 줄
     summary.json    과제별/전체 요약 + 실행 조건(모델, 스크린샷 크기 등)
     <과제>-<회차>/  실행별 스크린샷과 actions.jsonl
 
-긴급 정지: F12(PC_AGENT_KILL_KEY) / 마우스를 왼쪽 위 모서리로 / Ctrl+C (그때까지의 결과는 저장된다)
+긴급 정지: 마우스를 왼쪽 위 모서리로 / Ctrl+C (그때까지의 결과는 저장된다)
 """
 import argparse
 import json
@@ -36,14 +34,12 @@ from anthropic import APIError  # noqa: E402
 
 import config  # noqa: E402
 from actions import backends  # noqa: E402
-from actions.assist import backend_warning  # noqa: E402
 from actions.executor import Executor  # noqa: E402
-from agent import context, loop, memory, profiles, refs  # noqa: E402
+from agent import context, loop  # noqa: E402
 from benchmark.metrics import format_table, summarize  # noqa: E402
 from benchmark.tasks import TASK_SET_VERSION, CheckContext, get_tasks  # noqa: E402
 from logs.recorder import Recorder  # noqa: E402
-from perception import window  # noqa: E402
-from safety import killswitch  # noqa: E402
+from perception.capture import Screen  # noqa: E402
 from safety.guard import Guard  # noqa: E402
 
 
@@ -74,46 +70,29 @@ def main() -> int:
     parser.add_argument("--tasks", help="쉼표로 구분한 과제 id (기본: 전체)")
     parser.add_argument("--repeat", type=int, default=1, help="과제별 반복 횟수")
     parser.add_argument("--label", default="", help="결과 폴더 이름에 붙일 이름")
-    parser.add_argument("--profile", default=None,
-                        help="프로필 이름 또는 .toml 경로 (기본: PC_AGENT_PROFILE)")
     parser.add_argument("--assist", default=None,
                         help="보조 도구: uia, wait, all, none (기본: PC_AGENT_ASSIST 환경 변수)")
     parser.add_argument("--context", default=None,
                         help="컨텍스트 전략: server, prune, none (기본: PC_AGENT_CONTEXT 환경 변수)")
     parser.add_argument("--input", default=None,
                         help="입력 백엔드: pyautogui, directinput (기본: PC_AGENT_INPUT 환경 변수)")
-    parser.add_argument("--memory", default=None,
-                        help="지식 메모 파일 (기본: PC_AGENT_MEMORY 환경 변수, none이면 끔)")
-    parser.add_argument("--ref", action="append", default=None,
-                        help="참고 자료 파일. 여러 번 쓸 수 있음 (기본: PC_AGENT_REFS)")
     parser.add_argument("--list", action="store_true", help="과제 목록만 출력")
     parser.add_argument("--no-pause", action="store_true", help="과제 사이에 Enter를 기다리지 않음")
     args = parser.parse_args()
 
-    profile = None
     try:
-        name = args.profile if args.profile is not None else config.PROFILE
-        if name and name.strip().lower() != "none":
-            profile = profiles.load(profiles.find(name.strip(), config.PROFILES_DIR))
-            profiles.apply(profile, config)
         if args.assist is not None:
             config.ASSIST = config.parse_assist(args.assist)
         if args.context is not None:
             config.CONTEXT = args.context.strip().lower()
         context.resolve_strategy(config.CONTEXT, config.MODEL)  # 잘못된 값이면 여기서 ValueError
-        if args.memory is not None:
-            config.MEMORY_FILE = "" if args.memory.strip().lower() in ("", "none") else args.memory.strip()
-        if args.ref is not None:
-            config.REFS = [p for r in args.ref for p in refs.parse_paths(r)]
         if args.input is not None:
             config.INPUT_BACKEND = args.input.strip().lower()
         if config.INPUT_BACKEND not in backends.BACKENDS:
             raise ValueError(f"알 수 없는 입력 백엔드: {config.INPUT_BACKEND} "
                              f"(사용 가능: {', '.join(backends.BACKENDS)})")
-        if config.KILL_KEY:
-            killswitch.vk_code(config.KILL_KEY)
         tasks = get_tasks([t.strip() for t in args.tasks.split(",")] if args.tasks else None)
-    except (ValueError, OSError) as err:
+    except ValueError as err:
         print(err)
         return 2
 
@@ -123,16 +102,11 @@ def main() -> int:
         return 0
 
     try:
-        backend = backends.create(config.INPUT_BACKEND, click_settle=config.CLICK_SETTLE,
-                                  click_hold=config.CLICK_HOLD)
+        backend = backends.create(config.INPUT_BACKEND)
     except ImportError as err:
         print(f"입력 백엔드 '{config.INPUT_BACKEND}'를 불러오지 못했습니다: {err}")
         return 2
-    try:
-        screen, win = window.open_screen(config.MAX_LONG_EDGE, config.MONITOR_INDEX, config.WINDOW)
-    except LookupError as err:
-        print(err)
-        return 2
+    screen = Screen(config.MAX_LONG_EDGE, config.MONITOR_INDEX)
     name = "bench-" + time.strftime("%Y%m%d-%H%M%S") + (f"-{args.label}" if args.label else "")
     out_dir = Path(config.RUNS_DIR) / name
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -149,15 +123,7 @@ def main() -> int:
         "assist": config.ASSIST,
         "context": context.resolve_strategy(config.CONTEXT, config.MODEL)[0],
         "prompt_cache": config.PROMPT_CACHE,
-        "profile": {"name": profile.name, "file": str(profile.path)} if profile else None,
-        "mode": config.MODE,
         "input_backend": backend.name,
-        "window": win.title if win else None,
-        "refs": config.REFS,
-        "memory": {"file": config.MEMORY_FILE or None, "reflect": config.MEMORY_REFLECT,
-                   "notes_at_start": len(memory.Memory(config.MEMORY_FILE).notes) if config.MEMORY_FILE else 0},
-        "kill_key": config.KILL_KEY,
-        "game": {"fov": config.GAME_FOV, "counts_per_deg": config.GAME_COUNTS_PER_DEG},
         "clear": {"trigger": config.CLEAR_TRIGGER, "keep": config.CLEAR_KEEP,
                   "at_least": config.CLEAR_AT_LEAST},
         "prune": {"keep": config.PRUNE_KEEP, "batch": config.PRUNE_BATCH},
@@ -168,10 +134,7 @@ def main() -> int:
     print(f"결과 폴더: {out_dir}")
     print(f"모델 {config.MODEL} · 화면 {screen.width}x{screen.height} → {screen.shot_w}x{screen.shot_h} "
           f"· 과제 {len(tasks)}개 × {args.repeat}회 · 보조 도구 {','.join(config.ASSIST) or '없음'} · 컨텍스트 {meta['context']} · 입력 {backend.name}")
-    if warning := backend_warning(config.ASSIST, backend.name):
-        print(warning)
-    watcher = killswitch.start_hotkey(config.KILL_KEY, on_trigger=backend.release_all)
-    print(killswitch.stop_hint(watcher) + "\n")
+    print("긴급 정지: 마우스를 왼쪽 위 모서리로 / Ctrl+C\n")
 
     records: list[dict] = []
     results_file = open(out_dir / "results.jsonl", "a", encoding="utf-8")
@@ -194,11 +157,7 @@ def main() -> int:
                     task.setup()
 
                 recorder = Recorder(str(out_dir), task.goal, name=f"{task.id}-{trial}")
-                guard = Guard(confirm=True)
-                executor = Executor(screen, guard, recorder, config.ACTION_DELAY, backend)
-                if win:
-                    executor.focus_hwnd = win.hwnd
-                    guard.after_prompt = executor.ensure_focus
+                executor = Executor(screen, Guard(confirm=True), recorder, config.ACTION_DELAY, backend)
                 result = loop.RunResult()
                 started = time.perf_counter()
                 try:
@@ -217,10 +176,6 @@ def main() -> int:
                     result.status = "aborted"
                     result.final = type(err).__name__
                     stopped = True
-                finally:
-                    released = backend.release_all()
-                    if released:
-                        recorder.event("release_all", inputs=released)
                 seconds = time.perf_counter() - started
 
                 ctx = CheckContext(final=result.final, screen_size=(screen.width, screen.height))
@@ -244,8 +199,6 @@ def main() -> int:
             if stopped:
                 break
     finally:
-        if watcher:
-            watcher.stop()
         results_file.close()
         summary = summarize(records) if records else {"overall": None, "tasks": {}}
         meta["finished"] = time.strftime("%Y-%m-%d %H:%M:%S")

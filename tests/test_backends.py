@@ -192,8 +192,3 @@ def test_cursor_position_uses_backend(monkeypatch):
     b.position = lambda: (200, 100)
     ex.screen.to_shot = lambda x, y: (x // 2, y // 2)
     assert ex.run("cursor_position", {}) == "X=100, Y=50"
-
-
-def test_directinput_has_game_click_timing(fake_pdi):
-    b = backends.create("directinput")
-    assert b.click_settle > 0 and b.click_hold > 0

@@ -79,17 +79,13 @@ def with_cache_breakpoints(messages: list[dict], recent: int = 3) -> list[dict]:
     return out
 
 
-def _image_slots(messages: list[dict], protect=()) -> list[tuple[list, int]]:
-    """대화 속 모든 이미지 블록의 위치 (담긴 리스트, 인덱스)를 오래된 순서로.
-    protect에 든 블록(사용자가 고른 참고 이미지 등)은 같은 객체인지로 판단해 뺀다."""
-    protected = {id(b) for b in protect}
+def _image_slots(messages: list[dict]) -> list[tuple[list, int]]:
+    """대화 속 모든 이미지 블록의 위치 (담긴 리스트, 인덱스)를 오래된 순서로."""
     slots = []
     for msg in messages:
         if msg.get("role") != "user" or not isinstance(msg.get("content"), list):
             continue
         for i, block in enumerate(msg["content"]):
-            if id(block) in protected:
-                continue
             if block.get("type") == "image":
                 slots.append((msg["content"], i))
             elif block.get("type") == "tool_result" and isinstance(block.get("content"), list):
@@ -103,11 +99,10 @@ def count_images(messages: list[dict]) -> int:
     return len(_image_slots(messages))
 
 
-def prune_images(messages: list[dict], keep: int, batch: int, protect=()) -> int:
+def prune_images(messages: list[dict], keep: int, batch: int) -> int:
     """이미지가 keep + batch장을 넘으면 최근 keep장만 남기고 나머지를 자리표시 텍스트로 바꾼다.
-    대화 기록을 제자리에서 수정하고, 지운 장수를 돌려준다. 넘지 않으면 아무것도 하지 않는다.
-    protect에 든 이미지 블록은 세지도 지우지도 않는다."""
-    slots = _image_slots(messages, protect)
+    대화 기록을 제자리에서 수정하고, 지운 장수를 돌려준다. 넘지 않으면 아무것도 하지 않는다."""
+    slots = _image_slots(messages)
     if len(slots) <= keep + batch:
         return 0
     old = slots[: len(slots) - keep] if keep > 0 else slots
