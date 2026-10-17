@@ -28,18 +28,9 @@ def _to_pil(raw) -> Image.Image:
 
 
 class Screen:
-    def __init__(self, max_long_edge: int = 1280, monitor_index: int = 1,
-                 region: tuple[int, int, int, int] | None = None):
-        """region = (left, top, width, height)을 주면 모니터 대신 그 영역만 캡처한다 (예: 게임 창).
-        스크린샷 좌표의 (0,0)은 그 영역의 왼쪽 위가 된다."""
+    def __init__(self, max_long_edge: int = 1280, monitor_index: int = 1):
         self._sct = mss.mss()
-        if region is not None:
-            left, top, width, height = region
-            if width <= 0 or height <= 0:
-                raise ValueError(f"잘못된 캡처 영역: {region}")
-            self.monitor = {"left": left, "top": top, "width": width, "height": height}
-        else:
-            self.monitor = self._sct.monitors[monitor_index]
+        self.monitor = self._sct.monitors[monitor_index]
         self.left = self.monitor["left"]
         self.top = self.monitor["top"]
         self.width = self.monitor["width"]
@@ -66,14 +57,7 @@ class Screen:
 
     # ---------- 캡처 ----------
     def capture(self) -> Image.Image:
-        return self.shrink(self.capture_raw())
-
-    def capture_raw(self) -> Image.Image:
-        """축소하지 않은 원본 해상도 캡처 (픽셀 단위 판정용)."""
-        return _to_pil(self._sct.grab(self.monitor))
-
-    def shrink(self, img: Image.Image) -> Image.Image:
-        """원본 캡처를 Claude에게 보낼 스크린샷 크기로 줄인다."""
+        img = _to_pil(self._sct.grab(self.monitor))
         if self.scale < 1.0:
             img = img.resize((self.shot_w, self.shot_h), Image.LANCZOS)
         return img
