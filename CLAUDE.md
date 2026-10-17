@@ -6,7 +6,7 @@ Claude로 Windows PC를 조작하는 에이전트 하네스. 리서치/실험용
 최종 목표: 순수 computer use 기준 성능을 먼저 측정한 뒤, 보조 기능(UIA 요소 트리, 화면 변화 감지 등)을 붙여 개선 폭을 비교한다. 이후 마인크래프트 에이전트로 확장할 예정이다.
 
 ## 실행
-- `uv sync` 후 `uv run main.py "목표"` (긴 프롬프트는 `uv run main.py -f prompts\파일.txt`, 실행 창에서는 `@prompts\파일.txt`)
+- `uv sync` 후 `uv run main.py "목표"` (긴 프롬프트는 `uv run main.py -f prompts\파일.txt`, 실행 창에서는 `@prompts\파일.txt` 또는 📂 파일 버튼. 실행 중에 보내면 파일 내용이 추가 지시가 됨)
 - 실행 창(터미널 없이, 음성 입력): `uv run app.py`. 바탕화면 바로가기는 `install_shortcut.ps1` (pythonw로 콘솔 없이 실행). `-Startup`이면 로그인 때 `app.py --minimized`로 자동 실행, `-RemoveStartup`으로 해제
 - sdk 엔진은 미리 `claude`를 실행해 구독 계정으로 로그인해 둔다. api 엔진은 `ANTHROPIC_API_KEY` 필요
 - 환경 변수: `PC_AGENT_ENGINE` (sdk, api), `PC_AGENT_MEMORY` (0이면 경험 기억 끔), `PC_AGENT_MEMORY_DIR` (기본 memory), `PC_AGENT_MAX_CHAIN` (이어서 하기 최대 실행 수, 기본 5, 1이면 끔), `PC_AGENT_EFFORT` (low, medium, high, xhigh, max: 생각 깊이, sdk 전용, 기본 medium. 실행 창은 low/medium/high만 고름), `PC_AGENT_WEB` (1이면 WebSearch/WebFetch 켜기, sdk 전용), `PC_AGENT_MODEL`, `PC_AGENT_MAX_STEPS`, `PC_AGENT_MAX_LONG_EDGE`, `PC_AGENT_MONITOR`, `PC_AGENT_ASSIST` (보조 도구: uia, wait, all), `PC_AGENT_CONTEXT` (server, prune, none), `PC_AGENT_INPUT` (pyautogui, directinput), `PC_AGENT_ACTION_DELAY` (기본 0.4초), `PC_AGENT_RUNS_DIR` (기본 runs), `PC_AGENT_PROMPT_CACHE`·`PC_AGENT_CLEAR_*`·`PC_AGENT_PRUNE_*` (api 전용 컨텍스트 세부 설정), `PC_AGENT_WHISPER_MODEL` (음성 인식 모델, 기본 large-v3-turbo), `PC_AGENT_HOTKEY` (실행 창 전역 단축키, 기본 ctrl+alt+space)
