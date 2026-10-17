@@ -84,6 +84,7 @@ def main() -> int:
     args = parser.parse_args()
     config.MAX_CHAIN = 1  # 벤치마크는 이어서 하기 없이 한 실행(MAX_STEPS)으로만 잰다
     config.MEMORY = False  # 경험 기억도 끈다 (실행마다 조건이 달라지지 않게)
+    config.GAME = "none"   # 게임 지식 파일도 쓰지 않는다 (배운 점이 쌓이면 조건이 바뀌므로)
 
     try:
         if args.assist is not None:

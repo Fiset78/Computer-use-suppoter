@@ -3,6 +3,8 @@
 사용법:
     uv run main.py "메모장을 열고 '안녕하세요'라고 입력해줘"
     uv run main.py            # 실행 후 목표를 입력
+    uv run main.py --game minecraft "나무를 캐서 제작대를 만들어줘"   # 게임 지식 파일 직접 지정
+      (지정하지 않으면 목표에 나온 게임 이름으로 games/ 폴더의 파일을 자동으로 고른다. none이면 끔)
 
 긴급 정지: 마우스를 화면 왼쪽 위 모서리로 급히 옮기거나, 터미널에서 Ctrl+C
 """
@@ -17,7 +19,7 @@ enable_dpi_awareness()
 import config  # noqa: E402
 from actions import backends  # noqa: E402
 from actions.executor import Executor  # noqa: E402
-from agent import context  # noqa: E402
+from agent import context, games  # noqa: E402
 from agent.chain import run_chain  # noqa: E402
 from agent.engine import get_runner  # noqa: E402
 from logs.recorder import Recorder  # noqa: E402
@@ -27,6 +29,9 @@ from safety.guard import Guard  # noqa: E402
 
 def main() -> None:
     args = sys.argv[1:]
+    if len(args) >= 2 and args[0] == "--game":
+        config.GAME = args[1].strip()
+        args = args[2:]
     if len(args) == 2 and args[0] in ("-f", "--file"):
         # 긴 목표(여러 줄 프롬프트)는 파일로 넘긴다: uv run main.py -f prompts\minecraft_controls.txt
         try:
@@ -44,6 +49,7 @@ def main() -> None:
         context.resolve_strategy(config.CONTEXT, config.MODEL)
         run_agent, _ = get_runner(config.ENGINE)
         backend = backends.create(config.INPUT_BACKEND)
+        game, _ = games.load(config.GAME, goal, config.GAMES_DIR)  # 모르는 게임 이름이면 여기서 ValueError
     except (ValueError, ImportError) as err:
         print(err)
         return
@@ -60,7 +66,8 @@ def main() -> None:
         print("주의: 웹 도구(PC_AGENT_WEB)는 sdk 엔진에서만 쓸 수 있어서 무시합니다.")
     web_label = "켬" if config.WEB and config.ENGINE == "sdk" else "끔"
     print(f"엔진: {config.ENGINE} · 보조 도구: {', '.join(config.ASSIST) or '없음 (순수 computer use)'} · "
-          f"웹 도구: {web_label} · 컨텍스트 전략: {context_label} · 입력 백엔드: {backend.name}")
+          f"웹 도구: {web_label} · 컨텍스트 전략: {context_label} · 입력 백엔드: {backend.name} · "
+          f"게임 지식: {game.title if game else '없음'}")
     print("긴급 정지: 마우스를 왼쪽 위 모서리로 / Ctrl+C\n")
 
     try:

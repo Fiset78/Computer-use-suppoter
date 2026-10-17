@@ -23,6 +23,12 @@ MAX_CHAIN = int(os.getenv("PC_AGENT_MAX_CHAIN", "5"))
 MEMORY = os.getenv("PC_AGENT_MEMORY", "1") != "0"
 MEMORY_DIR = os.getenv("PC_AGENT_MEMORY_DIR", "memory")
 
+# 게임 지식 파일: <GAMES_DIR>/<게임>.md 의 조작법·기초 지식을 첫 메시지에 넣는다.
+# GAME이 비면 목표 문장에 나온 게임 이름으로 자동 감지, 게임 id/이름이면 그 파일, none이면 끈다.
+# sdk 엔진은 플레이 중 확인한 사실을 add_game_note 도구로 파일 끝 '배운 점'에 덧붙인다. 벤치마크는 항상 끈다.
+GAME = os.getenv("PC_AGENT_GAME", "").strip()
+GAMES_DIR = os.getenv("PC_AGENT_GAMES_DIR", "games")
+
 # 에이전트 루프 최대 반복 수 (무한 루프·비용 폭주 방지)
 MAX_STEPS = int(os.getenv("PC_AGENT_MAX_STEPS", "30"))
 

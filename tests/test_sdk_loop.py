@@ -75,3 +75,21 @@ def test_action_time_is_recorded():
     before = tools.ready_at
     asyncio.run(tools.computer({"actions": [{"action": "key", "text": "a"}]}))
     assert stats.action_seconds >= 0 and tools.ready_at >= before
+
+
+def test_game_note_tool(tmp_path):
+    from agent import games
+    path = tmp_path / "minecraft.md"
+    path.write_text("# 마인크래프트\n\n## 배운 점\n", encoding="utf-8")
+    game = games.parse(path.read_text(encoding="utf-8"), "minecraft", path)
+    assert "add_game_note" not in [t.name for t in sdk_loop._Tools(FakeExecutor(), FakeRecorder(), RunResult(),
+                                                                    assist=None).build()]
+    tools = sdk_loop._Tools(FakeExecutor(), FakeRecorder(), RunResult(), assist=None, game=game)
+    assert "add_game_note" in [t.name for t in tools.build()]
+    out = asyncio.run(tools.game_note_tool({"note": "e로 인벤토리를 연다"}))
+    assert not out.get("is_error") and "- e로 인벤토리를 연다 (" in path.read_text(encoding="utf-8")
+    out = asyncio.run(tools.game_note_tool({"note": "e로 인벤토리를 연다"}))
+    assert "건너뛰었습니다" in out["content"][1]["text"]
+    assert asyncio.run(tools.game_note_tool({"note": " "}))["is_error"]
+    assert "add_game_note" in sdk_loop.system_prompt(None, False, game=True)
+    assert "add_game_note" not in sdk_loop.system_prompt(None, False)

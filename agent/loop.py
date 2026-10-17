@@ -19,7 +19,7 @@ from actions.assist import OBSERVE_TOOLS as ASSIST_OBSERVE_TOOLS
 from actions import backends
 from actions.assist import AssistTools
 from actions.executor import Executor
-from agent import context
+from agent import context, games
 from logs.recorder import Recorder
 
 TOOLSET = "computer"
@@ -159,11 +159,18 @@ def run(goal: str, executor: Executor, recorder: Recorder, stats: RunResult | No
         print(f"주의: {warning}")
     recorder.event("context", strategy=strategy, prompt_cache=config.PROMPT_CACHE)
 
+    # 게임 지식은 읽기만 한다 (배운 점 덧붙이기는 sdk 엔진 전용)
+    game, game_text = games.load(config.GAME, goal, config.GAMES_DIR)
+    game_prompt = f"{games.as_prompt(game, game_text)}\n\n" if game is not None else ""
+    if game is not None:
+        print(f"게임 지식: {game.title} ({game.path.as_posix()})")
+        recorder.event("game", id=game.id, path=game.path.as_posix())
+
     # 지시 텍스트를 이미지보다 먼저 두면 클릭 정확도가 좋아진다 (공식 권장)
     messages: list[dict] = [{
         "role": "user",
         "content": [
-            {"type": "text", "text": f"목표: {goal}\n\n아래는 현재 화면입니다."},
+            {"type": "text", "text": f"목표: {goal}\n\n{game_prompt}아래는 현재 화면입니다."},
             executor.screenshot_block("initial"),
         ],
     }]
