@@ -1,0 +1,24 @@
+# 마인크래프트 Java 에디션. 창 모드로 띄우고, 비디오 설정에서 FOV 70 · FOV 효과 0%로 맞춰 두세요.
+name = "마인크래프트"
+mode = "game"
+window = "Minecraft"                # 이 문자열이 제목에 들어간 창만 캡처·조작
+input = "directinput"
+assist = ["game", "minecraft"]
+memory = "memory/minecraft.md"      # 플레이하며 배운 것을 저장 (memory/는 git에 올라가지 않음)
+max_steps = 80
+
+prompt = """
+- 이동 W/A/S/D, 점프 space, 달리기 ctrl, 웅크리기 shift, 인벤토리 e, 핫바 선택 1~9, 아이템 버리기 q
+- 블록 캐기는 조준한 뒤 마우스 왼쪽을 누르고 있어야 합니다 (hold의 mouse=["left"]). 놓기는 마우스 오른쪽 클릭.
+- 맨손으로는 나무만 캘 수 있습니다. 돌을 캐려면 곡괭이가 필요합니다.
+- 밤에는 몬스터가 나오니 날이 어두워지면 피신하세요. 체력(하트)이 줄면 먼저 안전한 곳으로 가세요.
+- 일시정지 메뉴가 떠 있으면 "게임으로 돌아가기"를 누르세요.
+"""
+
+[camera]
+fov = 70
+counts_per_deg = 6.667              # 마우스 감도 100%(기본값) 기준
+
+[click]
+settle = 0.05
+hold = 0.05

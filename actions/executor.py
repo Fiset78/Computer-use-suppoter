@@ -12,8 +12,14 @@ import pyperclip
 
 from actions.backends import InputBackend, PyAutoGuiBackend
 from actions.keys import parse_combo, parse_modifiers
+from perception import window
 from perception.capture import Screen, to_image_block
+from safety import killswitch
 from safety.guard import Guard
+
+
+# 입력을 보내지 않는 도구 (포커스 확인과 행동 후 대기를 건너뜀)
+OBSERVE_ONLY = ("screenshot", "zoom", "cursor_position", "wait")
 
 
 class Executor:
@@ -25,6 +31,18 @@ class Executor:
         self.recorder = recorder
         self.action_delay = action_delay
         self.last_shot = None  # Claude에게 마지막으로 보낸 전체 스크린샷 (wait_for_change의 기준)
+        self.focus_hwnd: int | None = None  # 설정하면 입력 전에 이 창을 활성 창으로 만든다 (PC_AGENT_WINDOW)
+
+    def ensure_focus(self) -> None:
+        """대상 창이 활성 창이 아니면 되돌린다. 입력은 활성 창으로 가므로, 사용자가 터미널을 클릭해 두면
+        키 입력이 터미널에 들어가 버린다."""
+        if self.focus_hwnd is None or window.foreground() == self.focus_hwnd:
+            return
+        ok = window.focus(self.focus_hwnd)
+        if self.recorder:
+            self.recorder.event("refocus", ok=ok)
+        if not ok:
+            raise RuntimeError("대상 창을 활성 창으로 만들지 못했습니다. 사용자가 창을 직접 클릭해야 합니다.")
 
     # ---------- 공통 유틸 ----------
     def _point(self, coord) -> tuple[int, int]:
@@ -38,6 +56,28 @@ class Executor:
     def _move_if(self, coord) -> None:
         if coord is not None:
             self.input.move_to(*self._point(coord))
+            killswitch.sleep(self.input.click_settle)
+
+    def press(self, button: str = "left", clicks: int = 1) -> None:
+        """현재 커서 위치에서 클릭. 백엔드에 click_hold가 있으면 누른 채로 잠깐 유지한 뒤 뗀다."""
+        hold = self.input.click_hold
+        if hold <= 0:
+            self.input.click(button=button, clicks=clicks, interval=0.08)
+            return
+        for i in range(clicks):
+            if i:
+                killswitch.sleep(0.06)  # 더블 클릭 간격 안에 들어가도록 짧게
+            self.input.mouse_down(button)
+            try:
+                killswitch.sleep(hold)
+            finally:
+                self.input.mouse_up(button)
+
+    def click_at(self, point: tuple[int, int], button: str = "left") -> None:
+        """실제 화면 좌표로 옮겨서 클릭 (보조 도구용)."""
+        self.input.move_to(*point)
+        killswitch.sleep(self.input.click_settle)
+        self.press(button)
 
     @contextmanager
     def _hold(self, modifiers: list[str]):
@@ -67,9 +107,12 @@ class Executor:
         handler = getattr(self, f"do_{name}", None)
         if handler is None:
             raise NotImplementedError(f"구현되지 않은 도구입니다: {name}")
+        killswitch.check()
+        if name not in OBSERVE_ONLY:
+            self.ensure_focus()
         result = handler(inp)
-        if name not in ("screenshot", "zoom", "cursor_position", "wait"):
-            time.sleep(self.action_delay)  # UI가 반응할 시간
+        if name not in OBSERVE_ONLY:
+            killswitch.sleep(self.action_delay)  # UI가 반응할 시간
         return result
 
     # ---------- 관찰 ----------
@@ -91,7 +134,7 @@ class Executor:
     def _click(self, inp, button="left", clicks=1):
         with self._hold(parse_modifiers(inp.get("text"))):
             self._move_if(inp.get("coordinate"))
-            self.input.click(button=button, clicks=clicks, interval=0.08)
+            self.press(button, clicks)
         return "OK"
 
     def do_left_click(self, inp):
@@ -182,9 +225,9 @@ class Executor:
         self.guard.check_key(combo)
         duration = min(float(inp["duration"]), 300)
         with self._hold(combo):
-            time.sleep(duration)
+            killswitch.sleep(duration)
         return "OK"
 
     def do_wait(self, inp):
-        time.sleep(min(float(inp.get("duration", 1)), 300))
+        killswitch.sleep(min(float(inp.get("duration", 1)), 300))
         return "OK"
