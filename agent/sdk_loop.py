@@ -12,6 +12,7 @@ Claude Agent SDK가 Claude Code CLI를 띄우고 에이전트 루프(요청 → 
 import asyncio
 
 import anyio
+from datetime import date
 from pathlib import Path
 import time
 from typing import Any
@@ -32,7 +33,7 @@ import config
 from actions import backends
 from actions.assist import TOOL_DEFS as ASSIST_TOOL_DEFS, AssistTools
 from actions.executor import Executor
-from agent import batch, memory, usage
+from agent import batch, games, memory, usage
 from agent.inbox import MARKER, as_block, inbox
 from agent.loop import RunResult, build_system_prompt
 from logs.recorder import Recorder
@@ -74,6 +75,25 @@ REMEMBER_TOOL_SCHEMA = {
         "keywords": {"type": "array", "items": {"type": "string"}, "description": "찾을 때 쓸 단어 (앱 이름, 기능 이름 등)"},
     },
     "required": ["situation", "problem", "solution"],
+    "additionalProperties": False,
+}
+
+GAME_PROMPT_NOTE = """- 첫 메시지의 [게임 지식]은 사람이 정리한 이 게임의 조작법과 기초 지식입니다. 그대로 따르되, 화면과 다르면 화면을 믿으세요.
+  플레이하며 직접 확인한 새 사실(지식과 다른 조작, 화면 읽는 법, 통한 공략, 이 PC에서 맞는 look delta 등)은
+  확인한 직후 add_game_note로 한 줄씩 남기세요. 다음 실행부터 게임 지식에 함께 들어갑니다.
+  게임 지식에 이미 있는 내용, 이번 판에만 해당하는 일(지금 좌표, 지금 가진 아이템)은 남기지 마세요.
+"""
+
+GAME_NOTE_TOOL_DESCRIPTION = (
+    "지금 하는 게임의 지식 파일 끝 '배운 점'에 한 줄을 덧붙입니다. 다음 실행부터 게임 지식과 함께 주어집니다. "
+    "플레이하며 직접 확인한 사실만, 다음에 그대로 쓸 수 있게 구체적으로 적으세요 (키 이름, 수치, 메뉴 위치 등)."
+)
+GAME_NOTE_TOOL_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "note": {"type": "string", "description": "덧붙일 지식 한 줄 (예: 인벤토리에서 shift+클릭하면 핫바와 가방 사이로 바로 옮겨진다)"},
+    },
+    "required": ["note"],
     "additionalProperties": False,
 }
 
@@ -169,9 +189,11 @@ def builtin_tools(web: bool) -> list[str]:
     return list(WEB_TOOLS) if web else []
 
 
-def system_prompt(assist: AssistTools | None, web: bool, handoff: bool = False, remember: bool = False) -> str:
+def system_prompt(assist: AssistTools | None, web: bool, handoff: bool = False, remember: bool = False,
+                  game: bool = False) -> str:
     return (build_system_prompt(assist) + SDK_PROMPT_NOTE + (HANDOFF_PROMPT_NOTE if handoff else "")
-            + (MEMORY_PROMPT_NOTE if remember else "") + (WEB_PROMPT_NOTE if web else ""))
+            + (MEMORY_PROMPT_NOTE if remember else "") + (GAME_PROMPT_NOTE if game else "")
+            + (WEB_PROMPT_NOTE if web else ""))
 
 
 def memory_file() -> Path:
@@ -209,7 +231,8 @@ class _Tools:
     """MCP 도구 핸들러. 긴급 정지는 결과로 숨기지 않고 abort에 담아 루프가 멈추게 한다."""
 
     def __init__(self, executor: Executor, recorder: Recorder, stats: RunResult,
-                 assist: AssistTools | None, handoff: bool = False, remember: bool = False):
+                 assist: AssistTools | None, handoff: bool = False, remember: bool = False,
+                 game: games.Game | None = None):
         self.executor = executor
         self.recorder = recorder
         self.stats = stats
@@ -219,6 +242,7 @@ class _Tools:
         self.ready_at = time.monotonic()  # 마지막 도구 결과를 돌려준 시각 (다음 응답까지가 Claude의 생각 시간)
         self.handoff_enabled = handoff
         self.remember_enabled = remember
+        self.game = game                   # 지식 파일을 쓰는 게임 (있으면 add_game_note 도구를 켬)
         self.remembered: list[str] = []    # 이번 실행에서 저장·갱신한 교훈 id
         self.handoff: dict | None = None   # handoff 도구로 받은 {progress, next_goal}
 
@@ -252,6 +276,8 @@ class _Tools:
             tools.append(tool("handoff", HANDOFF_TOOL_DESCRIPTION, HANDOFF_TOOL_SCHEMA)(self.handoff_tool))
         if self.remember_enabled:
             tools.append(tool("remember_lesson", REMEMBER_TOOL_DESCRIPTION, REMEMBER_TOOL_SCHEMA)(self.remember_tool))
+        if self.game is not None:
+            tools.append(tool("add_game_note", GAME_NOTE_TOOL_DESCRIPTION, GAME_NOTE_TOOL_SCHEMA)(self.game_note_tool))
         return tools
 
     async def remember_tool(self, args: dict[str, Any]) -> dict:
@@ -267,6 +293,21 @@ class _Tools:
         print(f"  📝 교훈 {verb}: {lesson['situation']} → {lesson['solution']}")
         self.recorder.event("lesson", updated=updated, **{k: lesson[k] for k in ("id", "situation", "problem", "solution")})
         return {"content": [self._note(), {"type": "text", "text": f"교훈을 {verb} (id {lesson['id']}). 하던 일을 계속하세요."}]}
+
+    async def game_note_tool(self, args: dict[str, Any]) -> dict:
+        note = args.get("note", "")
+        try:
+            path = self.game.path
+            text, added = games.add_note(path.read_text(encoding="utf-8-sig"), note, date.today().isoformat())
+            if added:
+                path.write_text(text, encoding="utf-8")
+        except (OSError, ValueError) as err:
+            return {"content": [{"type": "text", "text": f"덧붙이지 못했습니다: {err}"}], "is_error": True}
+        if not added:
+            return {"content": [self._note(), {"type": "text", "text": "이미 있는 내용이라 건너뛰었습니다. 하던 일을 계속하세요."}]}
+        print(f"  📝 게임 지식 추가 ({self.game.title}): {note.strip()}")
+        self.recorder.event("game_note", game=self.game.id, note=note.strip())
+        return {"content": [self._note(), {"type": "text", "text": f"{self.game.path.as_posix()}에 덧붙였습니다. 하던 일을 계속하세요."}]}
 
     async def handoff_tool(self, args: dict[str, Any]) -> dict:
         self.handoff = {"progress": args.get("progress", ""), "next_goal": args.get("next_goal", "")}
@@ -332,7 +373,11 @@ async def _run(goal: str, executor: Executor, recorder: Recorder, stats: RunResu
     assist = AssistTools(executor, config.ASSIST) if config.ASSIST else None
     handoff = config.MAX_CHAIN > 1
     remember = config.MEMORY
-    handlers = _Tools(executor, recorder, stats, assist, handoff=handoff, remember=remember)
+    game, game_text = games.load(config.GAME, goal, config.GAMES_DIR)
+    if game is not None:
+        print(f"  🎮 게임 지식: {game.title} ({game.path.as_posix()})")
+        recorder.event("game", id=game.id, path=game.path.as_posix())
+    handlers = _Tools(executor, recorder, stats, assist, handoff=handoff, remember=remember, game=game)
     # 경험 기억: 목표와 비슷한 상황의 교훈을 골라 첫 메시지에 넣는다
     picked = memory.pick(memory.load(memory_file()), goal) if remember else []
     if picked:
@@ -345,7 +390,7 @@ async def _run(goal: str, executor: Executor, recorder: Recorder, stats: RunResu
 
     options = ClaudeAgentOptions(
         model=config.MODEL,
-        system_prompt=system_prompt(assist, config.WEB, handoff, remember),
+        system_prompt=system_prompt(assist, config.WEB, handoff, remember, game is not None),
         tools=builtins,                # 내장 도구는 웹 도구(켰을 때)만. Bash, Read, Edit 등은 항상 끔
         mcp_servers={SERVER: create_sdk_mcp_server(SERVER, tools=tools)},
         allowed_tools=allowed,
@@ -359,13 +404,15 @@ async def _run(goal: str, executor: Executor, recorder: Recorder, stats: RunResu
     )
     recorder.event("engine", engine="sdk", model=config.MODEL, effort=config.EFFORT, tools=allowed)
 
+    game_prompt = games.as_prompt(game, game_text) if game is not None else ""
+
     async def prompt():
         # 지시 텍스트를 이미지보다 먼저 둔다 (API 엔진과 같은 순서)
         yield {
             "type": "user",
             "message": {"role": "user", "content": [
-                {"type": "text", "text": f"목표: {goal}\n\n" + (f"{lessons_text}\n\n" if lessons_text else "")
-                 + "아래는 현재 화면입니다."},
+                {"type": "text", "text": f"목표: {goal}\n\n" + (f"{game_prompt}\n\n" if game_prompt else "")
+                 + (f"{lessons_text}\n\n" if lessons_text else "") + "아래는 현재 화면입니다."},
                 executor.screenshot_block("initial"),
             ]},
             "parent_tool_use_id": None,
