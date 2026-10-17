@@ -10,39 +10,27 @@ from contextlib import contextmanager
 
 import pyperclip
 
-from actions.backends import InputBackend, PyAutoGuiBackend
+from actions.backends import InputBackend, PyAutoGuiBackend, StopRequested
 from actions.keys import parse_combo, parse_modifiers
-from perception import window
+from perception import diff
 from perception.capture import Screen, to_image_block
-from safety import killswitch
 from safety.guard import Guard
-
-
-# 입력을 보내지 않는 도구 (포커스 확인과 행동 후 대기를 건너뜀)
-OBSERVE_ONLY = ("screenshot", "zoom", "cursor_position", "wait")
 
 
 class Executor:
     def __init__(self, screen: Screen, guard: Guard, recorder=None, action_delay: float = 0.4,
-                 backend: InputBackend | None = None):
+                 backend: InputBackend | None = None, stop_check=None):
         self.screen = screen
         self.input = backend if backend is not None else PyAutoGuiBackend()
         self.guard = guard
         self.recorder = recorder
         self.action_delay = action_delay
         self.last_shot = None  # Claude에게 마지막으로 보낸 전체 스크린샷 (wait_for_change의 기준)
-        self.focus_hwnd: int | None = None  # 설정하면 입력 전에 이 창을 활성 창으로 만든다 (PC_AGENT_WINDOW)
+        self.stop_check = stop_check  # 참을 돌려주면 다음 행동 전에 멈춘다 (실행 창의 정지 버튼)
 
-    def ensure_focus(self) -> None:
-        """대상 창이 활성 창이 아니면 되돌린다. 입력은 활성 창으로 가므로, 사용자가 터미널을 클릭해 두면
-        키 입력이 터미널에 들어가 버린다."""
-        if self.focus_hwnd is None or window.foreground() == self.focus_hwnd:
-            return
-        ok = window.focus(self.focus_hwnd)
-        if self.recorder:
-            self.recorder.event("refocus", ok=ok)
-        if not ok:
-            raise RuntimeError("대상 창을 활성 창으로 만들지 못했습니다. 사용자가 창을 직접 클릭해야 합니다.")
+    def check_stop(self) -> None:
+        if self.stop_check is not None and self.stop_check():
+            raise StopRequested("사용자가 정지했습니다.")
 
     # ---------- 공통 유틸 ----------
     def _point(self, coord) -> tuple[int, int]:
@@ -56,28 +44,6 @@ class Executor:
     def _move_if(self, coord) -> None:
         if coord is not None:
             self.input.move_to(*self._point(coord))
-            killswitch.sleep(self.input.click_settle)
-
-    def press(self, button: str = "left", clicks: int = 1) -> None:
-        """현재 커서 위치에서 클릭. 백엔드에 click_hold가 있으면 누른 채로 잠깐 유지한 뒤 뗀다."""
-        hold = self.input.click_hold
-        if hold <= 0:
-            self.input.click(button=button, clicks=clicks, interval=0.08)
-            return
-        for i in range(clicks):
-            if i:
-                killswitch.sleep(0.06)  # 더블 클릭 간격 안에 들어가도록 짧게
-            self.input.mouse_down(button)
-            try:
-                killswitch.sleep(hold)
-            finally:
-                self.input.mouse_up(button)
-
-    def click_at(self, point: tuple[int, int], button: str = "left") -> None:
-        """실제 화면 좌표로 옮겨서 클릭 (보조 도구용)."""
-        self.input.move_to(*point)
-        killswitch.sleep(self.input.click_settle)
-        self.press(button)
 
     @contextmanager
     def _hold(self, modifiers: list[str]):
@@ -104,15 +70,13 @@ class Executor:
 
     # ---------- 디스패치 ----------
     def run(self, name: str, inp: dict):
+        self.check_stop()
         handler = getattr(self, f"do_{name}", None)
         if handler is None:
             raise NotImplementedError(f"구현되지 않은 도구입니다: {name}")
-        killswitch.check()
-        if name not in OBSERVE_ONLY:
-            self.ensure_focus()
         result = handler(inp)
-        if name not in OBSERVE_ONLY:
-            killswitch.sleep(self.action_delay)  # UI가 반응할 시간
+        if name not in ("screenshot", "zoom", "cursor_position", "wait"):
+            time.sleep(self.action_delay)  # UI가 반응할 시간
         return result
 
     # ---------- 관찰 ----------
@@ -134,7 +98,7 @@ class Executor:
     def _click(self, inp, button="left", clicks=1):
         with self._hold(parse_modifiers(inp.get("text"))):
             self._move_if(inp.get("coordinate"))
-            self.press(button, clicks)
+            self.input.click(button=button, clicks=clicks, interval=0.08)
         return "OK"
 
     def do_left_click(self, inp):
@@ -163,6 +127,33 @@ class Executor:
             finally:
                 self.input.mouse_up("left")
         return "OK"
+
+    LOOK_STEP = 60   # 한 번에 보내는 상대 이동 크기 (너무 크면 일부 게임이 한 번에 받지 못함)
+    LOOK_LIMIT = 5000
+
+    LOOK_FREE_CURSOR = 25  # look 뒤 커서가 이만큼(px) 넘게 움직였으면 게임이 마우스를 잡고 있지 않은 것
+
+    def do_look(self, inp):
+        """게임 시점 돌리기: 마우스 상대 이동 신호를 잘게 나눠 보낸다.
+        게임이 마우스를 잡고 있으면 커서는 가운데에 고정돼 움직이지 않는다. 커서가 움직였다면
+        일시정지 메뉴·채팅·인벤토리가 열려 있거나 게임 창이 맨 앞이 아니라서 시점이 돌지 않은 것이다."""
+        dx, dy = (max(-self.LOOK_LIMIT, min(self.LOOK_LIMIT, int(v))) for v in inp["delta"])
+        before = self.input.position()
+        steps = max(1, -(-max(abs(dx), abs(dy)) // self.LOOK_STEP))
+        sent_x = sent_y = 0
+        for i in range(1, steps + 1):
+            tx, ty = round(dx * i / steps), round(dy * i / steps)
+            self.input.move_rel(tx - sent_x, ty - sent_y)
+            sent_x, sent_y = tx, ty
+            time.sleep(0.01)
+        time.sleep(0.05)
+        after = self.input.position()
+        moved = round(((after[0] - before[0]) ** 2 + (after[1] - before[1]) ** 2) ** 0.5)
+        if moved > self.LOOK_FREE_CURSOR:
+            return (f"주의: 시점이 돌지 않았을 가능성이 큽니다. 마우스 커서가 화면에서 {moved}px 움직였습니다 "
+                    "(게임이 마우스를 잡고 있으면 커서는 움직이지 않음). 일시정지 메뉴·채팅·인벤토리가 열려 있거나 "
+                    "게임 창이 맨 앞이 아닙니다. 게임 화면으로 돌아간 뒤 다시 look 하세요.")
+        return f"OK (시점 이동 {dx}, {dy})"
 
     def do_mouse_move(self, inp):
         self.input.move_to(*self._point(inp["coordinate"]), duration=0.1)
@@ -225,9 +216,59 @@ class Executor:
         self.guard.check_key(combo)
         duration = min(float(inp["duration"]), 300)
         with self._hold(combo):
-            killswitch.sleep(duration)
+            time.sleep(duration)
         return "OK"
 
     def do_wait(self, inp):
-        killswitch.sleep(min(float(inp.get("duration", 1)), 300))
+        time.sleep(min(float(inp.get("duration", 1)), 300))
         return "OK"
+
+    # ---------- 연속 장면 / 내 PC에서 감시 ----------
+    WATCH_EDGE = 640        # watch 장면의 긴 변(px). 작게 보내 사용량을 줄인다 (장당 약 300토큰)
+    WATCH_MAX_FRAMES = 6
+
+    def do_watch(self, inp):
+        """interval초 간격으로 frames장을 작게 찍어 한꺼번에 돌려준다 (움직임·방향 파악용)."""
+        frames = max(2, min(self.WATCH_MAX_FRAMES, int(inp.get("frames", 4))))
+        interval = max(0.2, min(2.0, float(inp.get("interval", 0.5))))
+        shots = []
+        start = time.perf_counter()
+        for i in range(frames):
+            if i:
+                time.sleep(interval)
+                self.check_stop()
+            shots.append((time.perf_counter() - start, self.screen.capture()))
+        first, last = shots[0][1], shots[-1][1]
+        moved = diff.change_ratio(first, last)
+        blocks = [{"type": "text", "text": (
+            f"{interval:.1f}초 간격 장면 {frames}장 (작게 줄인 화면이라 좌표를 클릭에 쓰지 마세요. "
+            f"처음과 끝의 변화 비율 {moved:.3f})")}]
+        for t, img in shots:
+            small = img.copy()
+            small.thumbnail((self.WATCH_EDGE, self.WATCH_EDGE))
+            if self.recorder:
+                self.recorder.image(small, "watch")
+            blocks += [{"type": "text", "text": f"{t:.1f}초"}, to_image_block(small)]
+        return blocks
+
+    def do_hold_until(self, inp):
+        """키를 누른 채(또는 누르지 않고) 내 PC에서 interval초마다 화면을 비교하다가 조건이 되면 멈춘다.
+        Claude를 매번 부르지 않으므로 0.5초 단위로 반응한다."""
+        until = inp.get("until", "still")
+        max_duration = max(0.5, min(30.0, float(inp.get("max_duration", inp.get("duration", 5)))))
+        interval = max(0.2, min(2.0, float(inp.get("interval", 0.5))))
+        threshold = inp.get("threshold")
+        combo = parse_combo(inp["text"]) if inp.get("text") else []
+        if combo:
+            self.input.check_keys(combo)
+            self.guard.check_key(combo)
+
+        def grab():
+            self.check_stop()  # 정지 버튼·음성 정지가 감시 중에도 먹히게
+            return self.screen.capture()
+
+        with self._hold(combo):
+            result = diff.monitor(grab, until, max_duration, interval,
+                                  float(threshold) if threshold is not None else None)
+        held = f"{'+'.join(combo)} 키를 누른 채 " if combo else ""
+        return f"OK: {held}{result.describe(until)}"

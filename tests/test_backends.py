@@ -194,6 +194,9 @@ def test_cursor_position_uses_backend(monkeypatch):
     assert ex.run("cursor_position", {}) == "X=100, Y=50"
 
 
-def test_directinput_has_game_click_timing(fake_pdi):
-    b = backends.create("directinput")
-    assert b.click_settle > 0 and b.click_hold > 0
+def test_sendinput_struct_matches_windows_x64():
+    import ctypes
+
+    from actions.backends import _INPUT, _MOUSEINPUT
+    if ctypes.sizeof(ctypes.c_void_p) == 8:   # 64비트 Windows의 INPUT은 40바이트
+        assert ctypes.sizeof(_MOUSEINPUT) == 32 and ctypes.sizeof(_INPUT) == 40

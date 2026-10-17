@@ -1,9 +1,0 @@
-# Windows 데스크톱 앱 조작 (메모장, 계산기, 파일 탐색기 등). 기준 성능 측정용 기본 프로필.
-name = "Windows 조작"
-mode = "desktop"
-input = "pyautogui"
-assist = []                         # 순수 computer use. 비교할 때는 ["uia", "wait"]
-
-prompt = """
-- 프로그램 실행은 Win 키 → 이름 입력 → Enter가 가장 확실합니다.
-"""

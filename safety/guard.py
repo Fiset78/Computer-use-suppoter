@@ -21,17 +21,16 @@ DANGEROUS_TEXT = re.compile(
 
 
 class Guard:
-    def __init__(self, confirm: bool = True):
+    def __init__(self, confirm: bool = True, ask=None):
         self.confirm = confirm
-        # 확인 질문에 답한 뒤 부를 함수. 사용자가 터미널을 클릭해 답했으므로 대상 창으로 포커스를 되돌린다.
-        self.after_prompt = None
+        self.ask = ask  # what -> bool. 없으면 터미널에서 묻는다 (실행 창은 대화상자를 넘긴다)
 
     def _ask(self, what: str) -> bool:
         if not self.confirm:
             return True
+        if self.ask is not None:
+            return bool(self.ask(what))
         ans = input(f"\n⚠️  위험할 수 있는 행동: {what}\n   실행할까요? [y/N] ").strip().lower()
-        if self.after_prompt is not None:
-            self.after_prompt()
         return ans == "y"
 
     def check_key(self, combo: list[str]) -> None:

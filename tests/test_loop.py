@@ -200,24 +200,3 @@ def test_failsafe_from_backend_stops_whole_loop():
     with pytest.raises(pyautogui.FailSafeException):
         loop.process_tool_calls(response(tool_use("a", "left_click"), tool_use("b", "key", text="a")),
                                 Stop(), FakeRecorder(), None)
-
-
-def test_result_preview():
-    assert loop.result_preview("OK") is None
-    assert loop.result_preview("OK: 수평 +12.0°, 수직 -2.0° 회전") == "OK: 수평 +12.0°, 수직 -2.0° 회전"
-    assert loop.result_preview([{"type": "image", "source": {}}]) == "[이미지]"
-    assert loop.result_preview([{"type": "text", "text": "변화 감지 (0.8초)"}, {"type": "image"}]) \
-        == "변화 감지 (0.8초) · [이미지]"
-    assert loop.result_preview("창: 계산기\n[1] 버튼 \"1\"\n[2] 버튼 \"2\"") == "창: 계산기 … (총 3줄)"
-    long = loop.result_preview("가" * 500)
-    assert len(long) == loop.RESULT_PREVIEW_CHARS and long.endswith("…")
-
-
-def test_tool_result_is_printed(capsys):
-    class Ex(FakeExecutor):
-        def run(self, name, inp):
-            return "X=10, Y=20"
-
-    loop.process_tool_calls(response(tool_use("a", "cursor_position")), Ex(), FakeRecorder(), None)
-    out = capsys.readouterr().out
-    assert "→ cursor_position" in out and "← X=10, Y=20" in out

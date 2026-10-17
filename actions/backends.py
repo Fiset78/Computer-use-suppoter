@@ -4,16 +4,20 @@
 - directinput : 게임용. pydirectinput-rgx로 SendInput + 스캔 코드를 보낸다.
                 DirectX 게임(마인크래프트 등)은 가상 키 코드 입력을 무시하는 경우가 많아서 필요하다.
 
-Executor와 보조 도구는 이 인터페이스로만 입력을 보낸다. 눌린 키/버튼을 기억해 두었다가
-release_all()로 한 번에 뗄 수 있다 (긴급 정지, 실행 종료 시). 키 이름은 pyautogui 기준(actions/keys.py)이고,
+Executor와 보조 도구는 이 인터페이스로만 입력을 보낸다. 키 이름은 pyautogui 기준(actions/keys.py)이고,
 백엔드가 모르는 키는 조용히 무시하지 않고 ValueError로 거부한다 (두 라이브러리 모두 기본은 무시).
 """
+import ctypes
 import sys
 
 # 긴급 정지 예외 클래스들. 백엔드를 만들 때 등록한다.
 _FAILSAFE_ERRORS: list[type] = []
 
 BACKENDS = ("pyautogui", "directinput")
+
+
+class StopRequested(Exception):
+    """사용자가 창의 정지 버튼을 눌렀다. 긴급 정지와 같은 경로로 실행 전체를 멈춘다."""
 
 
 def is_failsafe(err: BaseException) -> bool:
@@ -26,13 +30,12 @@ def _register_failsafe(exc: type) -> None:
         _FAILSAFE_ERRORS.append(exc)
 
 
+_register_failsafe(StopRequested)
+
+
 class InputBackend:
     """입력 백엔드 인터페이스. 좌표는 모두 실제 화면(가상 데스크톱) 픽셀 좌표다."""
     name = "base"
-    # 클릭 타이밍(초). 게임은 매 프레임 입력을 읽으므로, 커서 이동 직후 클릭하거나 누르고 바로 떼면
-    # 놓치거나 엉뚱한 칸을 누를 수 있다. 0이면 기존처럼 click()을 한 번에 보낸다.
-    click_settle = 0.0  # 커서를 옮긴 뒤 클릭까지 기다림
-    click_hold = 0.0    # 버튼을 누르고 뗄 때까지 유지
 
     def position(self) -> tuple[int, int]: raise NotImplementedError
     def move_to(self, x: int, y: int, duration: float = 0.0) -> None: raise NotImplementedError
@@ -53,38 +56,37 @@ class InputBackend:
         raise NotImplementedError
     def is_valid_key(self, key: str) -> bool: raise NotImplementedError
 
-    # ---------- 눌린 입력 추적 (긴급 정지·종료 시 전부 떼기) ----------
-    def _held(self) -> dict:
-        return self.__dict__.setdefault("_held_inputs", {})
-
-    def _mark(self, kind: str, name: str, down: bool) -> None:
-        held = self._held()
-        if down:
-            held[(kind, name)] = True
-        else:
-            held.pop((kind, name), None)
-
-    def release_all(self) -> list[str]:
-        """아직 눌려 있는 키/마우스 버튼을 전부 뗀다. 뗀 것의 이름 목록을 돌려준다.
-        긴급 정지 감시 스레드에서도 부르므로 예외를 밖으로 내보내지 않는다."""
-        released = []
-        items = list(self._held().copy())  # dict.copy()는 GIL 아래 한 번에 끝나서 다른 스레드와 겹쳐도 안전
-        for kind, name in reversed(items):
-            try:
-                if kind == "key":
-                    self.key_up(name)
-                else:
-                    self.mouse_up(name)
-                released.append(name)
-            except Exception:
-                pass
-            self._held().pop((kind, name), None)
-        return released
-
     def check_keys(self, keys) -> None:
         bad = [k for k in keys if not self.is_valid_key(k)]
         if bad:
             raise ValueError(f"입력 백엔드 '{self.name}'가 지원하지 않는 키입니다: {', '.join(bad)}")
+
+
+class _MOUSEINPUT(ctypes.Structure):
+    # Windows 크기 그대로 고정 (LONG/DWORD = 4바이트, ULONG_PTR = 포인터 크기)
+    _fields_ = [("dx", ctypes.c_int32), ("dy", ctypes.c_int32), ("mouseData", ctypes.c_uint32),
+                ("dwFlags", ctypes.c_uint32), ("time", ctypes.c_uint32), ("dwExtraInfo", ctypes.c_size_t)]
+
+
+class _INPUT(ctypes.Structure):
+    _fields_ = [("type", ctypes.c_uint32), ("mi", _MOUSEINPUT)]  # MOUSEINPUT이 union 중 가장 크다
+
+
+def send_relative_mouse(dx: int, dy: int) -> bool:
+    """마우스 장치가 움직인 것과 같은 상대 이동 신호를 보낸다 (Windows SendInput, MOUSEEVENTF_MOVE).
+
+    마인크래프트처럼 커서를 화면 가운데 고정하고 raw input만 읽는 게임은 '커서를 좌표로 옮기기'
+    (SetCursorPos, pyautogui.moveRel)에는 반응하지 않고 이 신호에만 시점이 돈다.
+    Windows가 아니면 False를 돌려주고 아무것도 하지 않는다."""
+    if sys.platform != "win32":
+        return False
+    import ctypes
+
+    inp = _INPUT(type=0, mi=_MOUSEINPUT(dx=int(dx), dy=int(dy), mouseData=0, dwFlags=0x0001, time=0, dwExtraInfo=0))
+    sent = ctypes.windll.user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(_INPUT))
+    if sent != 1:
+        raise OSError(f"SendInput 실패 (오류 {ctypes.get_last_error()})")
+    return True
 
 
 class PyAutoGuiBackend(InputBackend):
@@ -107,15 +109,17 @@ class PyAutoGuiBackend(InputBackend):
         self._p.moveTo(x, y, duration=duration)
 
     def move_rel(self, dx, dy):
+        # 게임 시점 돌리기가 되도록 실제 마우스와 같은 상대 이동 신호를 보낸다
+        if send_relative_mouse(dx, dy):
+            self._p.failSafeCheck()  # 커서가 왼쪽 위 모서리에 닿았으면 긴급 정지
+            return
         self._p.moveRel(dx, dy)
 
     def mouse_down(self, button="left"):
         self._p.mouseDown(button=button)
-        self._mark("mouse", button, True)
 
     def mouse_up(self, button="left"):
         self._p.mouseUp(button=button)
-        self._mark("mouse", button, False)
 
     def click(self, button="left", clicks=1, interval=0.08):
         self._p.click(button=button, clicks=clicks, interval=interval)
@@ -126,11 +130,9 @@ class PyAutoGuiBackend(InputBackend):
     def key_down(self, key):
         self.check_keys([key])
         self._p.keyDown(key)
-        self._mark("key", key, True)
 
     def key_up(self, key):
         self._p.keyUp(key)
-        self._mark("key", key, False)
 
     def hotkey(self, *keys):
         self.check_keys(keys)
@@ -145,10 +147,8 @@ class PyAutoGuiBackend(InputBackend):
 
 class DirectInputBackend(InputBackend):
     """게임용. 스캔 코드 기반이라 DirectX 게임에서도 입력이 들어간다.
-    move_rel은 상대 이동 API를 써서 1인칭 게임의 시점 회전(마우스 룩, 게임 보조 도구)에 쓴다."""
+    move_rel은 상대 이동 API를 써서 1인칭 게임의 시점 회전(마우스 룩)에 쓸 수 있다."""
     name = "directinput"
-    click_settle = 0.05
-    click_hold = 0.05
 
     def __init__(self, pause: float = 0.05):
         import pydirectinput  # pydirectinput-rgx 패키지 (Windows 전용)
@@ -165,15 +165,14 @@ class DirectInputBackend(InputBackend):
         self._d.moveTo(x, y, duration=duration)
 
     def move_rel(self, dx, dy):
-        self._d.moveRel(dx, dy, relative=True)
+        if not send_relative_mouse(dx, dy):  # 두 백엔드가 같은 방식으로 시점을 돌리게 한다
+            self._d.moveRel(dx, dy, relative=True)
 
     def mouse_down(self, button="left"):
         self._d.mouseDown(button=button)
-        self._mark("mouse", button, True)
 
     def mouse_up(self, button="left"):
         self._d.mouseUp(button=button)
-        self._mark("mouse", button, False)
 
     def click(self, button="left", clicks=1, interval=0.08):
         self._d.click(button=button, clicks=clicks, interval=interval)
@@ -184,11 +183,9 @@ class DirectInputBackend(InputBackend):
     def key_down(self, key):
         self.check_keys([key])
         self._d.keyDown(key)
-        self._mark("key", key, True)
 
     def key_up(self, key):
         self._d.keyUp(key)
-        self._mark("key", key, False)
 
     def hotkey(self, *keys):
         self.check_keys(keys)
@@ -205,17 +202,9 @@ class DirectInputBackend(InputBackend):
         return self._d.is_valid_key(key)
 
 
-def create(name: str, pause: float = 0.05, click_settle: float | None = None,
-           click_hold: float | None = None) -> InputBackend:
-    """click_settle / click_hold를 주면 백엔드 기본값 대신 쓴다 (PC_AGENT_CLICK_SETTLE / _HOLD)."""
+def create(name: str, pause: float = 0.05) -> InputBackend:
     if name == "pyautogui":
-        backend: InputBackend = PyAutoGuiBackend(pause)
-    elif name == "directinput":
-        backend = DirectInputBackend(pause)
-    else:
-        raise ValueError(f"알 수 없는 입력 백엔드: {name} (사용 가능: {', '.join(BACKENDS)})")
-    if click_settle is not None:
-        backend.click_settle = max(0.0, click_settle)
-    if click_hold is not None:
-        backend.click_hold = max(0.0, click_hold)
-    return backend
+        return PyAutoGuiBackend(pause)
+    if name == "directinput":
+        return DirectInputBackend(pause)
+    raise ValueError(f"알 수 없는 입력 백엔드: {name} (사용 가능: {', '.join(BACKENDS)})")

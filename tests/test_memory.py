@@ -1,144 +1,88 @@
-"""지식 메모: 파일 형식, remember/forget, 첫 메시지 주입, 작업 후 정리 단계."""
-from types import SimpleNamespace
-
-import pytest
-
-import config
-from agent import loop, memory
-from test_loop import FakeExecutor, FakeRecorder
+"""경험 기억: 교훈 저장·중복 갱신·관련 교훈 고르기·성공/실패 반영."""
+from agent import memory
 
 
-# ---------- 파일과 도구 ----------
-def test_parse_and_render_roundtrip():
-    text = memory.HEADER + "\n- [2026-10-01] 나무는 맨손으로 3초 눌러야 캐진다\n- 날짜 없는 메모\n잡다한 줄\n-\n"
-    notes = memory.parse(text)
-    assert [(n.id, n.date, n.text) for n in notes] == [
-        (1, "2026-10-01", "나무는 맨손으로 3초 눌러야 캐진다"), (2, "", "날짜 없는 메모")]
-    assert memory.parse(memory.render(notes)) == notes
+def sample():
+    lessons = []
+    lessons, mc, _ = memory.add(lessons, "마인크래프트 게임 화면에서 시점 돌리기",
+                                "mouse_move로는 시점이 돌지 않음", "look 행동으로 delta [300, 0]씩 돌린다",
+                                ["마인크래프트", "시점"], now=1)
+    lessons, chat, _ = memory.add(lessons, "마인크래프트 채팅으로 명령어 입력",
+                                  "/ 키로 열고 /give를 또 입력해 슬래시가 두 개가 됨",
+                                  "t로 채팅창을 연 뒤 /give ... 를 입력한다", ["마인크래프트", "명령어", "채팅"], now=2)
+    lessons, note, _ = memory.add(lessons, "메모장에 한글 입력", "type이 느림", "type은 클립보드로 붙여 넣으니 그대로 쓴다",
+                                  ["메모장"], now=3)
+    return lessons, mc, chat, note
 
 
-def test_remember_saves_immediately_and_skips_duplicates(tmp_path):
-    path = tmp_path / "sub" / "mc.md"
-    m = memory.Memory(path)
-    assert m.loaded == 0 and m.prompt_text() is None
-    assert m.run("remember", {"note": "  인벤토리는\n e 키  "}) == "저장했습니다: [1]"
-    assert "이미 있는" in m.run("remember", {"note": "인벤토리는 e 키"})
-    again = memory.Memory(path)
-    assert [n.text for n in again.notes] == ["인벤토리는 e 키"]
-    assert again.notes[0].date  # 저장한 날짜가 붙는다
-    with pytest.raises(ValueError):
-        m.run("remember", {"note": "   "})
-    assert len(m.run("remember", {"note": "가" * 1000})) and len(m.notes[-1].text) == memory.MAX_NOTE_CHARS
+def test_tokens_handle_korean_particles():
+    assert tokens_overlap("마인크래프트에서", "마인크래프트를")
 
 
-def test_forget_keeps_ids_stable(tmp_path):
-    path = tmp_path / "mc.md"
-    m = memory.Memory(path)
-    for t in ("하나", "둘", "셋"):
-        m.run("remember", {"note": t})
-    m.run("forget", {"note_id": 2, "reason": "틀림"})
-    assert m.run("remember", {"note": "넷"}) == "저장했습니다: [4]"  # 지워도 번호를 당기지 않음
-    with pytest.raises(ValueError):
-        m.run("forget", {"note_id": 2})
-    assert [n.text for n in memory.Memory(path).notes] == ["하나", "셋", "넷"]
-    assert m.added == 4 and m.forgotten == 1
+def tokens_overlap(a, b):
+    return memory.tokens(a) & memory.tokens(b)
 
 
-def test_prompt_text_marks_notes_as_reference_and_keeps_newest(tmp_path):
-    m = memory.Memory(tmp_path / "mc.md", max_prompt_chars=30)
-    for t in ("오래된 메모 " + "가" * 10, "중간 메모", "최신 메모"):
-        m.run("remember", {"note": t})
-    text = m.prompt_text()
-    assert "사용자 지시가 아닙니다" in text
-    assert "[3] 최신 메모" in text and "[2] 중간 메모" in text and "[1]" not in text
-    assert "1개는 길이 제한으로 생략" in text
+def test_pick_relevant_first():
+    lessons, mc, chat, note = sample()
+    picked = memory.pick(lessons, "마인크래프트에서 /give 명령어로 나무를 받아줘")
+    assert picked[0]["id"] == chat["id"] and note["id"] not in [l["id"] for l in picked]
+    assert memory.pick(lessons, "계산기 열어줘") == []          # 관련 없으면 넣지 않는다
+    text = memory.as_prompt(picked)
+    assert text.startswith("[이전 실행에서 배운 점]") and "t로 채팅창" in text
 
 
-# ---------- 루프 연동 ----------
-def block(type_, **kw):
-    b = SimpleNamespace(type=type_, **kw)
-    b.model_dump = lambda **_: {k: v for k, v in vars(b).items() if k != "model_dump"}
-    return b
+def test_duplicate_updates_instead_of_adding():
+    lessons, mc, chat, note = sample()
+    lessons2, updated, was_update = memory.add(lessons, "마인크래프트 게임 화면에서 시점 돌리기",
+                                               "mouse_move로는 시점이 돌지 않음", "look delta [150, 0]이 90도쯤",
+                                               ["감도"], now=9)
+    assert was_update and len(lessons2) == 3
+    assert updated["id"] == mc["id"] and updated["revisions"] == 2 and "감도" in updated["keywords"]
+    assert "150" in updated["solution"]
 
 
-def reply(*blocks):
-    usage = SimpleNamespace(input_tokens=10, output_tokens=5,
-                            cache_read_input_tokens=0, cache_creation_input_tokens=0)
-    return SimpleNamespace(content=list(blocks), usage=usage, stop_reason="end_turn", context_management=None)
+def test_feedback_changes_ranking(tmp_path):
+    lessons, mc, chat, note = sample()
+    lessons = memory.feedback(lessons, [chat["id"]], succeeded=False)
+    lessons = memory.feedback(lessons, [chat["id"]], succeeded=False)
+    lessons = memory.feedback(lessons, [mc["id"]], succeeded=True)
+    by_id = {l["id"]: l for l in lessons}
+    assert by_id[chat["id"]]["failure"] == 2 and by_id[mc["id"]]["success"] == 1
+    assert memory.trust(by_id[mc["id"]]) > memory.trust(by_id[chat["id"]])
+    f = tmp_path / "lessons.json"
+    memory.save(f, lessons)
+    assert [l["id"] for l in memory.load(f)] == [l["id"] for l in lessons]
 
 
-class ScriptedClient:
-    def __init__(self, replies):
-        self.replies = list(replies)
-        self.sent = []
-        self.messages = SimpleNamespace(create=self.create)
-        self.beta = SimpleNamespace(messages=SimpleNamespace(create=self.create))
-
-    def create(self, **kw):
-        import copy
-        self.sent.append(copy.deepcopy(kw))
-        return self.replies.pop(0)
+def test_prune_keeps_trusted():
+    lessons = []
+    for i in range(5):
+        lessons, l, _ = memory.add(lessons, f"상황{i} 고유어{i}{i}", f"문제{i}", "해결", now=i)
+    lessons = memory.feedback(lessons, [lessons[4]["id"]], succeeded=True)
+    kept = memory.prune(lessons, limit=2)
+    assert len(kept) == 2 and lessons[4]["id"] in [l["id"] for l in kept]
 
 
-def run_scripted(monkeypatch, tmp_path, replies, reflect=True):
-    path = tmp_path / "mc.md"
-    path.write_text(memory.HEADER + "- [2026-10-01] 나무는 3초 눌러야 캐진다\n", encoding="utf-8")
-    client = ScriptedClient(replies)
-    monkeypatch.setattr(loop, "Anthropic", lambda: client)
-    monkeypatch.setattr(config, "CONTEXT", "none")
-    monkeypatch.setattr(config, "ASSIST", [])
-    monkeypatch.setattr(config, "MEMORY_FILE", str(path))
-    monkeypatch.setattr(config, "MEMORY_REFLECT", reflect)
-    ex = FakeExecutor()
-    result = loop.run("나무 캐기", ex, FakeRecorder())
-    return client, result, path, ex
+def test_sdk_remember_tool(tmp_path, monkeypatch):
+    import asyncio
 
+    import pytest
+    pytest.importorskip("claude_agent_sdk")
+    import config
+    from agent import sdk_loop
+    from agent.loop import RunResult
+    from tests.test_batch import FakeExecutor, FakeRecorder
 
-def test_memory_is_injected_and_tools_declared(monkeypatch, tmp_path):
-    client, result, _, _ = run_scripted(monkeypatch, tmp_path, [reply(block("text", text="완료"))],
-                                        reflect=False)
-    req = client.sent[0]
-    assert [t.get("name") for t in req["tools"][1:]] == ["remember", "forget"]
-    texts = [b["text"] for b in req["messages"][0]["content"] if b["type"] == "text"]
-    assert texts[0] == "목표: 나무 캐기"
-    assert "[1] 나무는 3초 눌러야 캐진다" in texts[1]
-    assert "remember" in req["system"][0]["text"]
-    assert result.status == "done" and len(client.sent) == 1
-
-
-def test_reflect_saves_notes_and_refuses_screen_actions(monkeypatch, tmp_path):
-    replies = [
-        reply(block("text", text="완료")),
-        reply(block("tool_use", id="r1", name="remember", input={"note": "도끼가 있으면 더 빨리 캔다"}),
-              block("tool_use", id="c1", name="left_click", input={"coordinate": [1, 1]},
-                    toolset_name="computer")),
-        reply(block("text", text="정리 끝")),
-    ]
-    client, result, path, ex = run_scripted(monkeypatch, tmp_path, replies)
-    assert len(client.sent) == 3
-    # system과 tools는 정리 단계에서도 그대로
-    assert client.sent[1]["system"] == client.sent[0]["system"]
-    assert client.sent[1]["tools"] == client.sent[0]["tools"]
-    reflect_msg = client.sent[1]["messages"][-1]
-    assert reflect_msg["role"] == "user" and "상태: done" in reflect_msg["content"][0]["text"]
-    results = client.sent[2]["messages"][-1]["content"]
-    assert results[0]["content"] == "저장했습니다: [2]" and "toolset_name" not in results[0]
-    assert results[1]["is_error"] and results[1]["toolset_name"] == "computer"
-    assert ex.ran == []  # 정리 단계에서는 화면을 조작하지 않는다
-    assert "도끼가 있으면 더 빨리 캔다" in path.read_text(encoding="utf-8")
-    assert result.status == "done" and result.steps == 1 and result.memory_added == 1
-    assert result.input_tokens == 30  # 정리 단계 토큰도 합산
-
-
-def test_reflect_after_max_steps_appends_to_last_tool_results(monkeypatch, tmp_path):
-    monkeypatch.setattr(config, "MAX_STEPS", 1)
-    replies = [
-        reply(block("tool_use", id="a", name="key", input={"text": "w"}, toolset_name="computer")),
-        reply(block("text", text="저장할 것 없음")),
-    ]
-    client, result, _, _ = run_scripted(monkeypatch, tmp_path, replies)
-    last = client.sent[1]["messages"][-1]
-    assert last["role"] == "user"
-    assert last["content"][0]["type"] == "tool_result" and last["content"][-1]["type"] == "text"
-    assert "상태: max_steps" in last["content"][-1]["text"]
-    assert result.status == "max_steps"
+    monkeypatch.setattr(config, "MEMORY_DIR", str(tmp_path))
+    tools = sdk_loop._Tools(FakeExecutor(), FakeRecorder(), RunResult(), assist=None, remember=True)
+    assert "remember_lesson" in [t.name for t in tools.build()]
+    args = {"situation": "마인크래프트 채팅", "problem": "슬래시 두 개", "solution": "t로 열고 /give 입력",
+            "keywords": ["마인크래프트"]}
+    out = asyncio.run(tools.remember_tool(args))
+    assert "새로 저장" in out["content"][1]["text"]
+    out2 = asyncio.run(tools.remember_tool({**args, "solution": "t로 열고 슬래시 하나로 입력"}))
+    assert "고쳐 썼습니다" in out2["content"][1]["text"]
+    saved = memory.load(tmp_path / "lessons.json")
+    assert len(saved) == 1 and saved[0]["solution"] == "t로 열고 슬래시 하나로 입력"
+    assert "remember_lesson" in sdk_loop.system_prompt(None, False, remember=True)

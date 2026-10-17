@@ -1,8 +1,27 @@
 """전역 설정. 환경 변수로 덮어쓸 수 있다."""
 import os
 
+# 에이전트 엔진: sdk | api
+#   sdk = Claude Agent SDK (Claude Code CLI + 구독 로그인, API 키 불필요). 기본값
+#   api = Anthropic Messages API 직접 호출 (computer_toolset_20260801, ANTHROPIC_API_KEY 필요)
+ENGINES = ("sdk", "api")
+ENGINE = os.getenv("PC_AGENT_ENGINE", "sdk").strip().lower()
+
 # 사용할 모델 (computer_toolset_20260801 지원 모델: Sonnet 5, Opus 5 / 5.5 등)
 MODEL = os.getenv("PC_AGENT_MODEL", "claude-sonnet-5")
+
+# Claude가 단계마다 얼마나 깊이 생각할지: low | medium | high | xhigh | max (sdk 엔진).
+# 낮을수록 빠르지만 어려운 작업은 실수가 늘 수 있다. 비우면 모델 기본값(보통 high).
+EFFORT = os.getenv("PC_AGENT_EFFORT", "medium").strip().lower() or None
+
+# 이어서 하기: 한 실행(최대 MAX_STEPS 단계) 안에 끝나지 않으면 Claude가 handoff 도구로 다음 실행에 넘긴다.
+# 최대 몇 번의 실행까지 이어 붙일지 (1이면 이어서 하기 끔). sdk 엔진 전용. 벤치마크는 항상 1.
+MAX_CHAIN = int(os.getenv("PC_AGENT_MAX_CHAIN", "5"))
+
+# 경험 기억: 실행 중 문제와 해결 방법을 교훈으로 남기고(remember_lesson), 다음 실행에 관련 교훈을 넣어 준다.
+# sdk 엔진 전용. 벤치마크는 항상 끈다 (기준 성능이 섞이지 않게). 저장: <MEMORY_DIR>/lessons.json
+MEMORY = os.getenv("PC_AGENT_MEMORY", "1") != "0"
+MEMORY_DIR = os.getenv("PC_AGENT_MEMORY_DIR", "memory")
 
 # 에이전트 루프 최대 반복 수 (무한 루프·비용 폭주 방지)
 MAX_STEPS = int(os.getenv("PC_AGENT_MAX_STEPS", "30"))
@@ -14,10 +33,6 @@ MAX_LONG_EDGE = int(os.getenv("PC_AGENT_MAX_LONG_EDGE", "1280"))
 # 캡처할 모니터 번호 (mss 기준: 1 = 주 모니터)
 MONITOR_INDEX = int(os.getenv("PC_AGENT_MONITOR", "1"))
 
-# 이 문자열이 제목에 들어간 창(예: "Minecraft")만 캡처하고, 행동 전에 그 창을 활성 창으로 만든다.
-# 게임 창 옆에 프로그램(터미널) 창을 함께 띄워 둘 때 쓴다. 비우면 모니터 전체를 캡처한다.
-WINDOW = os.getenv("PC_AGENT_WINDOW", "").strip()
-
 # 각 행동 후 UI가 반응할 때까지 기다리는 시간(초)
 ACTION_DELAY = float(os.getenv("PC_AGENT_ACTION_DELAY", "0.4"))
 
@@ -28,13 +43,10 @@ AUTO_SCREENSHOT = True
 RUNS_DIR = os.getenv("PC_AGENT_RUNS_DIR", "runs")
 
 
-# 켤 보조 도구 묶음 (로드맵 5단계). 쉼표로 구분: uia, wait, game, all. 비우면 순수 computer use (기준 성능).
+# 켤 보조 도구 묶음 (로드맵 5단계). 쉼표로 구분: uia, wait, all. 비우면 순수 computer use (기준 성능).
 #   uia  = list_ui_elements + click_element (Windows UI Automation)
 #   wait = wait_for_change (화면 변화 감지)
-#   game = look + look_at + hold + move_item (1인칭 게임의 시점 회전, 동시·지속 입력, 아이템 옮기기.
-#          directinput 백엔드와 함께 쓴다)
-#   minecraft = find_slots + click_slot (마인크래프트 인벤토리 칸 위치를 계산해 번호로 알려줌)
-ASSIST_GROUPS = ("uia", "wait", "game", "minecraft")
+ASSIST_GROUPS = ("uia", "wait")
 
 
 def parse_assist(text: str | None) -> list[str]:
@@ -52,6 +64,10 @@ def parse_assist(text: str | None) -> list[str]:
 
 
 ASSIST = parse_assist(os.getenv("PC_AGENT_ASSIST"))
+
+# Claude Code 내장 웹 도구(WebSearch, WebFetch)를 켤지 여부. sdk 엔진 전용.
+# 켜면 브라우저를 조작하지 않고 텍스트로 검색할 수 있다. 순수 화면 조작 성능을 잴 때는 끈다 (기본 꺼짐).
+WEB = os.getenv("PC_AGENT_WEB", "0").strip().lower() in ("1", "true", "yes", "on")
 
 # 컨텍스트 관리 전략 (로드맵 6단계): server | prune | none
 #   server = 서버 측 tool result clearing (권장, 모든 모델에서 안전)
@@ -72,57 +88,11 @@ CLEAR_AT_LEAST = int(os.getenv("PC_AGENT_CLEAR_AT_LEAST", "10000"))
 PRUNE_KEEP = int(os.getenv("PC_AGENT_PRUNE_KEEP", "3"))
 PRUNE_BATCH = int(os.getenv("PC_AGENT_PRUNE_BATCH", "10"))
 
+# 실행 창의 음성 입력 전역 단축키. 누르면 말하기 시작/멈추기, 실행 중에 누르면 정지
+HOTKEY = os.getenv("PC_AGENT_HOTKEY", "ctrl+alt+space")
+# 직접 정하지 않았을 때, 기본 단축키를 다른 프로그램이 쓰고 있으면 차례로 시도할 단축키
+HOTKEY_FALLBACKS = ("ctrl+alt+f9", "ctrl+shift+f9", "ctrl+alt+f12")
+HOTKEY_FROM_ENV = bool(os.getenv("PC_AGENT_HOTKEY"))
+
 # 입력 백엔드 (로드맵 7단계): pyautogui (일반 앱, 기본) | directinput (게임, pydirectinput-rgx)
 INPUT_BACKEND = os.getenv("PC_AGENT_INPUT", "pyautogui").strip().lower()
-
-
-def _optional_float(name: str) -> float | None:
-    value = os.getenv(name, "").strip()
-    return float(value) if value else None
-
-
-# 클릭 타이밍(초). 비우면 백엔드 기본값 (pyautogui 0/0, directinput 0.05/0.05).
-# 게임 인벤토리에서 클릭이 씹히면 늘린다.
-CLICK_SETTLE = _optional_float("PC_AGENT_CLICK_SETTLE")  # 커서 이동 후 클릭까지
-CLICK_HOLD = _optional_float("PC_AGENT_CLICK_HOLD")      # 누르고 뗄 때까지
-
-# 긴급 정지 단축키 (F1~F24, pause, scrolllock). 게임은 커서를 붙잡아서 '마우스를 모서리로'가 안 되므로 필요하다.
-# 빈 값이면 끈다.
-KILL_KEY = os.getenv("PC_AGENT_KILL_KEY", "f12").strip().lower()
-
-# game 보조 도구: 게임의 세로 시야각(도). 마인크래프트 기본 FOV는 70 ("FOV 효과"는 0%로 꺼 두는 것을 권장).
-GAME_FOV = float(os.getenv("PC_AGENT_GAME_FOV", "70"))
-
-# game 보조 도구: 시점 1도를 돌리는 데 필요한 마우스 상대 이동량(count).
-# 마인크래프트 Java: 1 count당 회전 = 1.2 × (감도×0.6 + 0.2)³ 도.
-# 기본 감도(화면 표시 100% = 내부값 0.5)면 0.15도/count → 6.667 count/도.
-GAME_COUNTS_PER_DEG = float(os.getenv("PC_AGENT_GAME_COUNTS_PER_DEG", "6.667"))
-
-# 지식 메모 파일 (예: memory/minecraft.md). 실행 시작 때 읽어 첫 메시지에 넣고, Claude가 remember/forget으로 고친다.
-# 비우면 끈다 (기준 성능 측정은 끈 상태로).
-MEMORY_FILE = os.getenv("PC_AGENT_MEMORY", "").strip()
-
-# 작업이 끝난 뒤 한 번 더 물어 교훈을 정리하게 할지 (API 호출 1~2번 추가)
-MEMORY_REFLECT = os.getenv("PC_AGENT_MEMORY_REFLECT", "1") != "0"
-
-# 첫 메시지에 넣을 메모의 최대 글자 수 (넘으면 최근 메모부터)
-MEMORY_MAX_CHARS = int(os.getenv("PC_AGENT_MEMORY_MAX_CHARS", "4000"))
-
-# 참고 자료 파일 (쉼표로 구분). 첫 메시지에 넣는다. 텍스트, 이미지(png/jpg/gif/webp), PDF. 읽기 전용.
-REFS = [t.strip() for t in os.getenv("PC_AGENT_REFS", "").split(",") if t.strip()]
-
-# 참고 자료 텍스트를 모두 합친 최대 글자 수 (넘으면 뒷부분 생략)
-REFS_MAX_CHARS = int(os.getenv("PC_AGENT_REFS_MAX_CHARS", "20000"))
-
-# main.py 시작 메뉴가 보여줄 폴더: 지식 메모 파일(.md)과 참고 자료
-MEMORY_DIR = os.getenv("PC_AGENT_MEMORY_DIR", "memory")
-REFS_DIR = os.getenv("PC_AGENT_REFS_DIR", "refs")
-
-# 프로필 (agent/profiles.py): 무엇을 조작할지와 그 설정. profiles/<이름>.toml
-PROFILES_DIR = os.getenv("PC_AGENT_PROFILES_DIR", "profiles")
-PROFILE = os.getenv("PC_AGENT_PROFILE", "").strip()   # 기본으로 쓸 프로필 이름 (시작 메뉴의 Enter)
-
-# 아래 셋은 프로필을 적용하면 채워진다
-MODE = "desktop"        # desktop = Windows 조작, game = 게임 조작 (시스템 프롬프트가 달라짐)
-PROFILE_NAME = ""
-PROFILE_PROMPT = ""     # 프로필의 prompt (이 게임/작업만의 안내)
