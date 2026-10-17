@@ -28,10 +28,13 @@ def write(tmp_path, text, name="p.toml"):
 
 def test_shipped_profiles_load_and_apply(cfg):
     keys = {p.key: p for p in profiles.list_profiles(ROOT / "profiles")}
-    assert {"desktop", "minecraft"} <= set(keys)
+    assert {"desktop", "minecraft", "babaisyou"} <= set(keys)
     profiles.apply(keys["minecraft"], cfg)
     assert cfg.MODE == "game" and cfg.WINDOW == "Minecraft" and cfg.INPUT_BACKEND == "directinput"
     assert cfg.ASSIST == ["game", "minecraft"] and cfg.GAME_FOV == 70 and cfg.CLICK_HOLD == 0.05
+    profiles.apply(keys["babaisyou"], cfg)
+    assert cfg.MODE == "game" and cfg.ASSIST == [] and cfg.WINDOW == "Baba Is You"  # 턴제: game 도구 끔
+    assert "되돌리기: z" in cfg.PROFILE_PROMPT
     profiles.apply(keys["desktop"], cfg)
     assert cfg.MODE == "desktop" and cfg.ASSIST == [] and cfg.INPUT_BACKEND == "pyautogui"
 
