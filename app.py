@@ -34,7 +34,7 @@ from actions.executor import Executor  # noqa: E402
 from agent.chain import run_chain  # noqa: E402
 from agent.inbox import follow_up_goal, inbox, is_stop_command  # noqa: E402
 from agent.engine import get_runner  # noqa: E402
-from agent import sdk_loop, usage  # noqa: E402
+from agent import games, sdk_loop, usage  # noqa: E402
 from agent.hidden import hide_child_consoles  # noqa: E402
 from logs.recorder import Recorder  # noqa: E402
 from perception.capture import Screen  # noqa: E402
@@ -49,6 +49,8 @@ FONT = ("Malgun Gothic", 11)
 EFFORTS = {"생각: 빠르게": "low", "생각: 보통": "medium", "생각: 깊게": "high"}
 # 창에서 고르는 모델 (None = PC_AGENT_MODEL 기본값). 빠른 모델은 한 단계가 짧지만 화면 판단은 덜 정확할 수 있다
 MODELS = {"모델: 기본": None, "모델: 빠르게 (Haiku 4.5)": "claude-haiku-4-5"}
+GAME_AUTO = "게임: 자동 감지"  # 목표 문장에 나온 게임 이름으로 games/ 파일을 고른다
+GAME_NONE = "게임: 쓰지 않음"
 MINIMIZE_WAIT = 0.8  # 창이 내려가는 애니메이션이 끝날 때까지 기다린 뒤 첫 스크린샷을 찍는다
 USAGE_REFRESH_MS = 10 * 60 * 1000  # 실행하지 않을 때 구독 한도를 다시 받아 오는 간격
 AUTO_RUN_DELAY = 2   # 알아들은 뒤 자동 실행까지 기다리는 초 (그사이 Esc/단축키로 취소)
@@ -164,14 +166,14 @@ class App:
         row.grid(row=0, column=0, sticky="ew")
         row.columnconfigure(0, weight=1)
         self.goal = tk.StringVar()
-        self.entry = ttk.Entry(row, textvariable=self.goal, font=FONT)
+        # width를 작게 둬야 화면 배율이 커도 입력칸이 옆 버튼을 창 밖으로 밀어내지 않는다 (sticky로 늘어남)
+        self.entry = ttk.Entry(row, textvariable=self.goal, font=FONT, width=10)
         self.entry.grid(row=0, column=0, sticky="ew", ipady=4)
         self.entry.bind("<Return>", lambda e: self.run())
         self.entry.bind("<Key>", self._on_entry_key)
         root.bind("<Escape>", lambda e: self.cancel_countdown("취소했습니다."))
         self.mic_btn = ttk.Button(row, text="🎤 말하기", command=self.toggle_mic, width=12)
         self.mic_btn.grid(row=0, column=1, padx=(8, 0))
-        ttk.Button(row, text="📂 파일", command=self.pick_file, width=8).grid(row=0, column=2, padx=(6, 0))
 
         row2 = ttk.Frame(frame)
         row2.grid(row=1, column=0, sticky="ew", pady=(10, 0))
@@ -180,6 +182,17 @@ class App:
         self.stop_btn = ttk.Button(row2, text="정지", command=self.stop, state="disabled")
         self.stop_btn.pack(side="left", padx=(6, 0))
         ttk.Button(row2, text="배운 점", command=self.open_lessons).pack(side="right")
+        # 게임 지식 파일 (games/*.md): 자동 감지 / 없음 / 게임 직접 고르기, 📂로 다른 곳의 파일을 가져온다
+        self.game_choice = tk.StringVar(value=GAME_AUTO)
+        self.game_ids: dict[str, str] = {}   # 메뉴에 보이는 이름 → config.GAME 값
+        # 버튼 줄이 꽉 차면 끝쪽 버튼이 잘리므로 입력칸 아래 따로 한 줄을 쓴다
+        game_row = ttk.Frame(row)
+        game_row.grid(row=1, column=0, columnspan=2, sticky="w", pady=(6, 0))
+        self.game_menu = ttk.OptionMenu(game_row, self.game_choice, GAME_AUTO)
+        self.game_menu.pack(side="left")
+        self.game_import_btn = ttk.Button(game_row, text="📂 게임 지식 가져오기", command=self.import_game)
+        self.game_import_btn.pack(side="left", padx=(6, 0))
+        self.refresh_games(select=config.GAME)
 
         row3 = ttk.Frame(frame)
         row3.grid(row=2, column=0, sticky="ew", pady=(8, 0))
@@ -207,6 +220,7 @@ class App:
         ]
         for cb in self.options:
             cb.pack(side="left", padx=(0, 14))
+        self.options += [self.game_menu, self.game_import_btn]  # 실행 중에는 게임도 바꾸지 않는다
         self.countdown_job = None
         self.overlay = Overlay(root)
 
@@ -484,23 +498,50 @@ class App:
         except (AttributeError, OSError) as err:
             self.notify(f"파일을 열지 못했습니다: {path} ({err})", 6)
 
-    def pick_file(self) -> None:
-        """목표(프롬프트) 파일을 골라 입력칸에 '@경로'로 넣는다. 실행을 누르면 파일 내용이 목표가 된다."""
+    def refresh_games(self, select: str = "") -> None:
+        """games 폴더를 다시 읽어 게임 메뉴를 만든다. select(게임 id/이름, none)가 있으면 그 항목을 고른다."""
+        found = games.list_games(config.GAMES_DIR)
+        self.game_ids = {GAME_AUTO: "", GAME_NONE: "none"}
+        for g in found:
+            self.game_ids[f"게임: {g.title}"] = g.id
+        current = self.game_choice.get()
+        if select:
+            if select.lower() in games.OFF:
+                current = GAME_NONE
+            else:
+                game = games.find(select, found)
+                current = f"게임: {game.title}" if game else current
+        if current not in self.game_ids:
+            current = GAME_AUTO
+        self.game_menu.set_menu(current, *self.game_ids)
+
+    def import_game(self) -> None:
+        """다른 곳에 있는 게임 지식 파일(.md)을 games 폴더로 복사해 메뉴에서 고르게 한다.
+        games 폴더 안의 파일을 고르면 복사하지 않고 그 게임을 고른다."""
         self.cancel_countdown()
-        start = Path("prompts") if Path("prompts").is_dir() else Path.cwd()
+        folder = Path(config.GAMES_DIR)
+        folder.mkdir(parents=True, exist_ok=True)
         name = filedialog.askopenfilename(
-            parent=self.root, title="목표 파일 고르기", initialdir=str(start.resolve()),
-            filetypes=[("텍스트 파일", "*.txt *.md"), ("모든 파일", "*.*")])
+            parent=self.root, title="게임 지식 파일 고르기", initialdir=str(folder.resolve()),
+            filetypes=[("게임 지식 파일", "*.md"), ("텍스트 파일", "*.txt"), ("모든 파일", "*.*")])
         if not name:
             return
-        path = Path(name)
+        src = Path(name).resolve()
+        if src.stem.startswith("_"):
+            self.notify("'_'로 시작하는 파일은 서식 견본이라 게임으로 쓰지 않습니다. 이름을 바꿔 주세요.", 6)
+            return
+        dest = (folder / f"{src.stem}.md").resolve()
         try:
-            path = path.resolve().relative_to(Path.cwd().resolve())  # 프로젝트 안이면 짧게 보여 준다
-        except ValueError:
-            pass
-        self.goal.set(f"@{path}")
-        self.entry.icursor("end")
-        self.status.set(f"파일을 골랐습니다: {path.name} ({'지시 보내기' if self.running else '실행'}를 누르면 내용을 보냅니다)")
+            if src != dest:
+                if dest.exists() and not messagebox.askyesno(
+                        "게임 지식 가져오기", f"{dest.name}이(가) 이미 있습니다. 덮어쓸까요?", parent=self.root):
+                    return
+                dest.write_text(src.read_text(encoding="utf-8-sig"), encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as err:
+            self.notify(f"게임 지식 파일을 가져오지 못했습니다: {err}", 6)
+            return
+        self.refresh_games(select=dest.stem)
+        self.status.set(f"게임 지식: {self.game_choice.get().removeprefix('게임: ')} ({folder.name}/{dest.name})")
 
     def read_goal_file(self, text: str) -> str | None:
         """'@경로'면 파일 내용을, 아니면 그대로 돌려준다. 읽지 못하면 알리고 None."""
@@ -532,7 +573,7 @@ class App:
                     if text:
                         self.send_instruction(text)
             return
-        # 긴 프롬프트는 파일로: @prompts\minecraft_controls.txt (📂 파일 버튼으로 골라도 된다)
+        # 긴 프롬프트는 파일로: @prompts\minecraft_controls.txt
         goal = self.read_goal_file(goal)
         if goal is None:
             return
@@ -545,6 +586,7 @@ class App:
         config.EFFORT = EFFORTS[self.effort.get()]
         config.MODEL = MODELS[self.model_choice.get()] or self.base_model
         config.ASSIST = list(config.ASSIST_GROUPS) if self.assist.get() else []
+        config.GAME = self.game_ids.get(self.game_choice.get(), "")
         self.stop_event.clear()
         self.set_running(True)
         self.overlay.hide()
