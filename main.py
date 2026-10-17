@@ -2,15 +2,13 @@
 
 사용법:
     uv run main.py "메모장을 열고 '안녕하세요'라고 입력해줘"
-    uv run main.py            # 시작 창에서 프로필·메모·참고 자료·목표를 고름
+    uv run main.py            # 실행 후 목표를 입력
     uv run main.py --memory memory/mc.md --ref refs/조작법.md --ref refs/제작법.png "목표"
     uv run main.py --profile minecraft "나무 4개 모아줘"   # 프로필로 실행 (게임/Windows 조작 선택)
     uv run main.py --new-profile 테라리아 --mode game --window Terraria   # 새 프로필 만들기
     uv run main.py --no-pick "목표"   # 시작 메뉴 없이 바로 실행
-    uv run main.py --no-gui   # 시작 창 대신 터미널 메뉴
 
-목표 없이 실행하면 시작 창(agent/gui.py)이 뜬다. 목표를 주면 터미널 메뉴에서
-프로필(무엇을 조작할지) → 지식 메모 → 참고 자료를 번호로 고른다.
+시작할 때 프로필(무엇을 조작할지) → 지식 메모 → 참고 자료를 번호로 고르는 메뉴가 나온다.
 
 긴급 정지: F12(PC_AGENT_KILL_KEY), 마우스를 화면 왼쪽 위 모서리로, 또는 터미널에서 Ctrl+C
 """
@@ -26,7 +24,7 @@ import config  # noqa: E402
 from actions import backends  # noqa: E402
 from actions.assist import backend_warning  # noqa: E402
 from actions.executor import Executor  # noqa: E402
-from agent import context, gui, loop, profiles, refs  # noqa: E402
+from agent import context, loop, profiles, refs  # noqa: E402
 from logs.recorder import Recorder  # noqa: E402
 from perception import window  # noqa: E402
 from safety import killswitch  # noqa: E402
@@ -47,9 +45,6 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--pick", action="store_true", help="시작 메뉴를 항상 보여줌")
     group.add_argument("--no-pick", action="store_true", help="시작 메뉴를 보여주지 않음")
-    view = parser.add_mutually_exclusive_group()
-    view.add_argument("--gui", action="store_true", help="목표를 줘도 시작 창을 띄움")
-    view.add_argument("--no-gui", action="store_true", help="시작 창 대신 터미널 메뉴로 고름")
     return parser.parse_args(argv)
 
 
@@ -63,41 +58,12 @@ def choose_profile(args: argparse.Namespace, interactive: bool) -> None:
         chosen = profiles.pick(config.PROFILES_DIR, config.PROFILE)
     elif config.PROFILE:
         chosen = profiles.load(profiles.find(config.PROFILE, config.PROFILES_DIR))
-    use_profile(chosen)
-
-
-def use_profile(chosen: profiles.Profile | None) -> None:
     if chosen is None:
         print("\n프로필: 없음 (Windows 조작, 환경 변수 설정)")
         return
     applied = profiles.apply(chosen, config)
     print(f"\n프로필: {chosen.name} [{profiles.MODES[chosen.mode]}] ({chosen.path})"
           + (f" · 적용: {', '.join(applied)}" if applied else ""))
-
-
-def use_window(args: argparse.Namespace, goal: str) -> bool:
-    """시작 창을 띄울지. 목표 없이 실행했고 고를 것을 명령줄로 정하지 않았을 때 (또는 --gui)."""
-    if args.gui:
-        return True
-    return (not goal and not args.no_gui and not args.no_pick
-            and args.profile is None and args.memory is None and args.ref is None)
-
-
-def choose_in_window(goal: str) -> gui.Selection | None | bool:
-    """시작 창으로 고르고 config에 적용한다. 취소하면 None, 창을 띄울 수 없으면 False."""
-    try:
-        sel = gui.choose(config.PROFILES_DIR, config.MEMORY_DIR, config.REFS_DIR, config.PROFILE,
-                         config.MEMORY_FILE, config.REFS, goal)
-    except Exception as err:  # tkinter가 없거나(ImportError) 화면이 없음(TclError)
-        print(f"시작 창을 띄우지 못해 터미널 메뉴로 고릅니다: {err}")
-        return False
-    if sel is None:
-        return None
-    use_profile(sel.profile)
-    config.MEMORY_FILE, config.REFS = sel.memory, list(sel.refs)
-    print(f"\n지식 메모: {config.MEMORY_FILE or '없음'} · 참고 자료: "
-          f"{', '.join(config.REFS) if config.REFS else '없음'}")
-    return sel
 
 
 def interactive_menu(args: argparse.Namespace) -> bool:
@@ -131,26 +97,18 @@ def main() -> None:
         print(f"프로필을 만들었습니다: {path}\n파일을 열어 조작법(prompt)과 설정을 채운 뒤 "
               f"uv run main.py --profile {args.new_profile} \"목표\" 로 실행하세요.")
         return
-    goal = " ".join(args.goal).strip()
-    # 게임 창으로 포커스를 옮기기 전에 고른다 (메뉴 입력이 터미널에 들어가야 하므로)
-    sel = choose_in_window(goal) if use_window(args, goal) else False
-    if sel is None:
-        print("시작을 취소했습니다.")
+    goal = " ".join(args.goal).strip() or input("목표를 입력하세요: ").strip()
+    if not goal:
+        print("목표가 비어 있습니다.")
         return
-    if sel:
-        goal = sel.goal
-    else:
-        goal = goal or input("목표를 입력하세요: ").strip()
-        if not goal:
-            print("목표가 비어 있습니다.")
-            return
-        interactive = interactive_menu(args)
-        try:
-            choose_profile(args, interactive)
-        except (ValueError, OSError) as err:
-            print(f"프로필을 불러오지 못했습니다: {err}")
-            return
-        choose_files(args, interactive)
+    # 게임 창으로 포커스를 옮기기 전에 고른다 (메뉴 입력이 터미널에 들어가야 하므로)
+    interactive = interactive_menu(args)
+    try:
+        choose_profile(args, interactive)
+    except (ValueError, OSError) as err:
+        print(f"프로필을 불러오지 못했습니다: {err}")
+        return
+    choose_files(args, interactive)
 
     try:
         context.resolve_strategy(config.CONTEXT, config.MODEL)
