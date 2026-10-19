@@ -97,7 +97,7 @@ Claude가 한 번 판단하는 데는 몇 초가 걸려서 0.5초마다 다시 �
 
 ## 게임 지식 파일
 게임마다 조작법과 기초 플레이 지식을 `games/<id>.md`에 적어 두면, 그 게임을 할 때 파일 내용을 첫 메시지에 함께 넘겨 그 지식대로 플레이합니다.
-지금은 `games/minecraft.md`가 들어 있고, 새 게임은 `games/_template.md`를 복사해 채우면 됩니다.
+지금은 `games/minecraft.md`, `games/babaisyou.md`, `games/balatro.md`가 들어 있고, 새 게임은 `games/_template.md`를 복사해 채우면 됩니다.
 
 - **자동 감지**: 목표 문장에 파일의 `이름:` 줄에 적은 이름(예: "마인크래프트")이 나오면 그 파일을 씁니다.
 - **직접 지정**: 실행 창의 **게임:** 메뉴, 또는 `uv run main.py --game minecraft "목표"`, `PC_AGENT_GAME=minecraft`. `none`이면 끕니다.
