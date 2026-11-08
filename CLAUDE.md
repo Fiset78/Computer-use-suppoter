@@ -10,7 +10,7 @@ Claude로 Windows PC를 조작하는 에이전트 하네스. 리서치/실험용
 - 실행 창(터미널 없이, 음성 입력): `uv run app.py`. 바탕화면 바로가기는 `install_shortcut.ps1` (pythonw로 콘솔 없이 실행). `-Startup`이면 로그인 때 `app.py --minimized`로 자동 실행, `-RemoveStartup`으로 해제
 - sdk 엔진은 미리 `claude`를 실행해 구독 계정으로 로그인해 둔다. api 엔진은 `ANTHROPIC_API_KEY` 필요
 - 환경 변수: `PC_AGENT_ENGINE` (sdk, api), `PC_AGENT_MEMORY` (0이면 경험 기억 끔), `PC_AGENT_MEMORY_DIR` (기본 memory), `PC_AGENT_GAME` (게임 지식 파일 id/이름, 비우면 목표에서 자동 감지, none이면 끔), `PC_AGENT_GAMES_DIR` (기본 games), `PC_AGENT_MAX_CHAIN` (이어서 하기 최대 실행 수, 기본 5, 1이면 끔), `PC_AGENT_EFFORT` (low, medium, high, xhigh, max: 생각 깊이, sdk 전용, 기본 medium. 실행 창은 low/medium/high만 고름), `PC_AGENT_WEB` (1이면 WebSearch/WebFetch 켜기, sdk 전용), `PC_AGENT_MODEL`, `PC_AGENT_MAX_STEPS`, `PC_AGENT_MAX_LONG_EDGE`, `PC_AGENT_MONITOR`, `PC_AGENT_ASSIST` (보조 도구: uia, wait, all), `PC_AGENT_CONTEXT` (server, prune, none), `PC_AGENT_INPUT` (pyautogui, directinput), `PC_AGENT_ACTION_DELAY` (기본 0.4초), `PC_AGENT_RUNS_DIR` (기본 runs), `PC_AGENT_PROMPT_CACHE`·`PC_AGENT_CLEAR_*`·`PC_AGENT_PRUNE_*` (api 전용 컨텍스트 세부 설정), `PC_AGENT_WHISPER_MODEL` (음성 인식 모델, 기본 large-v3-turbo), `PC_AGENT_HOTKEY` (실행 창 전역 단축키, 기본 ctrl+alt+space)
-- 실행 기록: `runs/<시각>/` (스크린샷 PNG + actions.jsonl)
+- 실행 기록: `runs/<시각>/` (스크린샷 PNG + actions.jsonl. `prompt`는 실제로 보낸 첫 메시지(게임 지식 포함), `text`는 Claude가 쓴 말)
 - 벤치마크: `uv run bench.py [--list] [--no-pause] [--tasks a,b] [--repeat N] [--label 이름] [--assist uia,wait] [--context server|prune|none] [--input pyautogui|directinput] [--engine sdk|api] [--web on|off]` → `runs/bench-<시각>/` (results.jsonl, summary.json)
 - 테스트: `uv run pytest` (순수 모듈만)
 
@@ -26,7 +26,7 @@ Claude로 Windows PC를 조작하는 에이전트 하네스. 리서치/실험용
 - `agent/games.py`: 게임 지식 파일 (순수). `games/<id>.md`(조작법·기초 지식, 지식만 담고 실행 설정은 넣지 않음)를 `이름:` 줄과 파일 이름으로 찾는다. 직접 지정(`--game`, `PC_AGENT_GAME`)이 먼저, 없으면 목표 문장에서 자동 감지(`resolve`). 두 엔진 모두 첫 메시지에 넣고, sdk 엔진은 `add_game_note` 도구로 파일 끝 `## 배운 점`에 한 줄씩 덧붙인다(같은 내용은 건너뜀). `_`로 시작하는 파일(`_template.md`)은 견본. 벤치마크는 항상 끔. 이어서 하기의 새 목표에도 원래 목표가 들어 있어 같은 게임이 다시 잡힌다
 - `games/`: 게임 지식 파일 (`minecraft.md`, `babaisyou.md`, `balatro.md`, 서식 견본 `_template.md`)
 - `agent/chain.py`: 이어서 하기. 실행 결과가 `handoff`면 `progress`/`next_goal`로 목표를 다시 만들어 새 실행을 이어 붙이고 통계를 합친다 (최대 `MAX_CHAIN`, 벤치마크는 1)
-- `prompts/`: 재사용 프롬프트 (`minecraft_controls.txt`: 마인크래프트 기본 조작 전체 확인)
+- `prompts/`: 재사용 프롬프트 (`minecraft_controls.txt`: 마인크래프트 기본 조작 전체 확인, `balatro_knowledge_check.txt`: 게임 지식을 실제로 읽는지 확인 문구로 시험)
 - `agent/engine.py`: 엔진 선택 (`get_runner`). 엔진별 의존성은 고를 때만 import
 - `agent/sdk_loop.py`: sdk 엔진. MCP 도구 등록, ClaudeSDKClient 실행, ResultMessage → `RunResult` (단계별 생각/행동 시간도 잰다: `think_seconds`, `action_seconds`)
 - `agent/batch.py`: sdk 엔진의 `computer` 도구 스키마와 배치 실행 규칙 (순수 모듈)

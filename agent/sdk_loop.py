@@ -405,14 +405,16 @@ async def _run(goal: str, executor: Executor, recorder: Recorder, stats: RunResu
     recorder.event("engine", engine="sdk", model=config.MODEL, effort=config.EFFORT, tools=allowed)
 
     game_prompt = games.as_prompt(game, game_text) if game is not None else ""
+    first_text = (f"목표: {goal}\n\n" + (f"{game_prompt}\n\n" if game_prompt else "")
+                  + (f"{lessons_text}\n\n" if lessons_text else "") + "아래는 현재 화면입니다.")
+    recorder.event("prompt", text=first_text)  # Claude에게 실제로 보낸 첫 메시지 (게임 지식이 들어갔는지 확인용)
 
     async def prompt():
         # 지시 텍스트를 이미지보다 먼저 둔다 (API 엔진과 같은 순서)
         yield {
             "type": "user",
             "message": {"role": "user", "content": [
-                {"type": "text", "text": f"목표: {goal}\n\n" + (f"{game_prompt}\n\n" if game_prompt else "")
-                 + (f"{lessons_text}\n\n" if lessons_text else "") + "아래는 현재 화면입니다."},
+                {"type": "text", "text": first_text},
                 executor.screenshot_block("initial"),
             ]},
             "parent_tool_use_id": None,
@@ -438,6 +440,7 @@ async def _run(goal: str, executor: Executor, recorder: Recorder, stats: RunResu
                 for block in msg.content:
                     if isinstance(block, TextBlock) and block.text.strip():
                         print(f"  Claude: {block.text.strip()}")
+                        recorder.event("text", step=stats.steps, text=block.text.strip())
                     elif isinstance(block, ToolUseBlock) and block.name in builtins:
                         # 웹 도구는 CLI가 직접 실행한다. 우리는 기록만 남긴다
                         print(f"  → {block.name} {block.input}")
