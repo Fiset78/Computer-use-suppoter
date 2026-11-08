@@ -26,7 +26,7 @@ Claude로 Windows PC를 조작하는 에이전트 하네스. 리서치/실험용
 - `agent/games.py`: 게임 지식 파일 (순수). `games/<id>.md`(조작법·기초 지식, 지식만 담고 실행 설정은 넣지 않음)를 `이름:` 줄과 파일 이름으로 찾는다. 직접 지정(`--game`, `PC_AGENT_GAME`)이 먼저, 없으면 목표 문장에서 자동 감지(`resolve`). 두 엔진 모두 첫 메시지에 넣고, sdk 엔진은 `add_game_note` 도구로 파일 끝 `## 배운 점`에 한 줄씩 덧붙인다(같은 내용은 건너뜀). `_`로 시작하는 파일(`_template.md`)은 견본. 벤치마크는 항상 끔. 이어서 하기의 새 목표에도 원래 목표가 들어 있어 같은 게임이 다시 잡힌다
 - `games/`: 게임 지식 파일 (`minecraft.md`, `babaisyou.md`, `balatro.md`, 서식 견본 `_template.md`)
 - `agent/chain.py`: 이어서 하기. 실행 결과가 `handoff`면 `progress`/`next_goal`로 목표를 다시 만들어 새 실행을 이어 붙이고 통계를 합친다 (최대 `MAX_CHAIN`, 벤치마크는 1)
-- `prompts/`: 재사용 프롬프트 (`minecraft_controls.txt`: 마인크래프트 기본 조작 전체 확인)
+- `prompts/`: 재사용 프롬프트 (`minecraft_controls.txt`: 마인크래프트 기본 조작 전체 확인, `balatro_knowledge_check.txt`: 게임 지식을 실제로 읽는지 확인 문구로 시험)
 - `agent/engine.py`: 엔진 선택 (`get_runner`). 엔진별 의존성은 고를 때만 import
 - `agent/sdk_loop.py`: sdk 엔진. MCP 도구 등록, ClaudeSDKClient 실행, ResultMessage → `RunResult` (단계별 생각/행동 시간도 잰다: `think_seconds`, `action_seconds`)
 - `agent/batch.py`: sdk 엔진의 `computer` 도구 스키마와 배치 실행 규칙 (순수 모듈)
