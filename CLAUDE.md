@@ -10,7 +10,7 @@ Claude로 Windows PC를 조작하는 에이전트 하네스. 리서치/실험용
 - 실행 창(터미널 없이, 음성 입력): `uv run app.py`. 바탕화면 바로가기는 `install_shortcut.ps1` (pythonw로 콘솔 없이 실행). `-Startup`이면 로그인 때 `app.py --minimized`로 자동 실행, `-RemoveStartup`으로 해제
 - sdk 엔진은 미리 `claude`를 실행해 구독 계정으로 로그인해 둔다. api 엔진은 `ANTHROPIC_API_KEY` 필요
 - 환경 변수: `PC_AGENT_ENGINE` (sdk, api), `PC_AGENT_MEMORY` (0이면 경험 기억 끔), `PC_AGENT_MEMORY_DIR` (기본 memory), `PC_AGENT_GAME` (게임 지식 파일 id/이름, 비우면 목표에서 자동 감지, none이면 끔), `PC_AGENT_GAMES_DIR` (기본 games), `PC_AGENT_MAX_CHAIN` (이어서 하기 최대 실행 수, 기본 5, 1이면 끔), `PC_AGENT_EFFORT` (low, medium, high, xhigh, max: 생각 깊이, sdk 전용, 기본 medium. 실행 창은 low/medium/high만 고름), `PC_AGENT_WEB` (1이면 WebSearch/WebFetch 켜기, sdk 전용), `PC_AGENT_MODEL`, `PC_AGENT_MAX_STEPS`, `PC_AGENT_MAX_LONG_EDGE`, `PC_AGENT_MONITOR`, `PC_AGENT_ASSIST` (보조 도구: uia, wait, all), `PC_AGENT_CONTEXT` (server, prune, none), `PC_AGENT_INPUT` (pyautogui, directinput), `PC_AGENT_ACTION_DELAY` (기본 0.4초), `PC_AGENT_RUNS_DIR` (기본 runs), `PC_AGENT_PROMPT_CACHE`·`PC_AGENT_CLEAR_*`·`PC_AGENT_PRUNE_*` (api 전용 컨텍스트 세부 설정), `PC_AGENT_WHISPER_MODEL` (음성 인식 모델, 기본 large-v3-turbo), `PC_AGENT_HOTKEY` (실행 창 전역 단축키, 기본 ctrl+alt+space)
-- 실행 기록: `runs/<시각>/` (스크린샷 PNG + actions.jsonl)
+- 실행 기록: `runs/<시각>/` (스크린샷 PNG + actions.jsonl. `prompt`는 실제로 보낸 첫 메시지(게임 지식 포함), `text`는 Claude가 쓴 말)
 - 벤치마크: `uv run bench.py [--list] [--no-pause] [--tasks a,b] [--repeat N] [--label 이름] [--assist uia,wait] [--context server|prune|none] [--input pyautogui|directinput] [--engine sdk|api] [--web on|off]` → `runs/bench-<시각>/` (results.jsonl, summary.json)
 - 테스트: `uv run pytest` (순수 모듈만)
 

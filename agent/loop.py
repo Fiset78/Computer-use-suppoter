@@ -166,11 +166,13 @@ def run(goal: str, executor: Executor, recorder: Recorder, stats: RunResult | No
         print(f"게임 지식: {game.title} ({game.path.as_posix()})")
         recorder.event("game", id=game.id, path=game.path.as_posix())
 
+    first_text = f"목표: {goal}\n\n{game_prompt}아래는 현재 화면입니다."
+    recorder.event("prompt", text=first_text)  # Claude에게 실제로 보낸 첫 메시지 (게임 지식이 들어갔는지 확인용)
     # 지시 텍스트를 이미지보다 먼저 두면 클릭 정확도가 좋아진다 (공식 권장)
     messages: list[dict] = [{
         "role": "user",
         "content": [
-            {"type": "text", "text": f"목표: {goal}\n\n{game_prompt}아래는 현재 화면입니다."},
+            {"type": "text", "text": first_text},
             executor.screenshot_block("initial"),
         ],
     }]
@@ -222,6 +224,7 @@ def run(goal: str, executor: Executor, recorder: Recorder, stats: RunResult | No
         for block in response.content:
             if block.type == "text" and block.text.strip():
                 print(f"  Claude: {block.text.strip()}")
+                recorder.event("text", step=step, text=block.text.strip())
 
         messages.append({"role": "assistant", "content": [_block_to_dict(b) for b in response.content]})
 
